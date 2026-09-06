@@ -25,10 +25,137 @@ state.employees.forEach(e=>{
  if(!e.end)e.end=d.end;
  if(!Array.isArray(e.breaks))e.breaks=structuredClone(d.breaks);
 });
+
+let remoteReady=false;
+let remoteSyncTimer=null;
+let remoteSyncBusy=false;
+
+function snapshotState(){
+ return {
+   version:18,
+   clients:state.clients,
+   machines:state.machines,
+   employees:state.employees,
+   parts:state.parts,
+   ops:state.ops,
+   jobs:state.jobs,
+   saturdays:state.saturdays||{}
+ };
+}
+
+function applySnapshot(data){
+ if(!data||typeof data!=='object')return false;
+ for(const k of ['clients','machines','employees','parts','ops','jobs']){
+   if(Array.isArray(data[k]))state[k]=data[k];
+ }
+ if(data.saturdays&&typeof data.saturdays==='object')state.saturdays=data.saturdays;
+ state.jobs.forEach(job=>{
+   if(job.of===undefined)job.of='';
+   if(job.completedDate===undefined)job.completedDate=null;
+ });
+ state.employees.forEach(e=>{
+   const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
+   if(!e.start)e.start=d.start;
+   if(!e.end)e.end=d.end;
+   if(!Array.isArray(e.breaks))e.breaks=structuredClone(d.breaks);
+ });
+ return true;
+}
+
+function supabaseConfigured(){
+ return !!(window.CNC_CONFIG?.SUPABASE_URL && window.CNC_CONFIG?.SUPABASE_KEY);
+}
+
+async function sbFetch(path,options={}){
+ const base=window.CNC_CONFIG.SUPABASE_URL.replace(/\/$/,'');
+ const headers={
+   apikey:window.CNC_CONFIG.SUPABASE_KEY,
+   Authorization:`Bearer ${window.CNC_CONFIG.SUPABASE_KEY}`,
+   'Content-Type':'application/json',
+   ...(options.headers||{})
+ };
+ const res=await fetch(`${base}/rest/v1/${path}`,{...options,headers});
+ if(!res.ok){
+   const text=await res.text();
+   throw new Error(`Supabase ${res.status}: ${text}`);
+ }
+ const txt=await res.text();
+ return txt?JSON.parse(txt):null;
+}
+
+function setMode(text,ok=false){
+ const el=document.getElementById('mode');
+ if(!el)return;
+ el.textContent=text;
+ el.classList.toggle('online',ok);
+}
+
+async function writeRemoteState(){
+ if(!remoteReady||remoteSyncBusy)return;
+ remoteSyncBusy=true;
+ try{
+   await sbFetch('app_state?on_conflict=id',{
+     method:'POST',
+     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
+     body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])
+   });
+   setMode('Supabase ligado',true);
+ }catch(err){
+   console.error(err);
+   setMode('Erro de sincronização');
+ }finally{
+   remoteSyncBusy=false;
+ }
+}
+
+function scheduleRemoteSave(){
+ if(!remoteReady)return;
+ clearTimeout(remoteSyncTimer);
+ remoteSyncTimer=setTimeout(writeRemoteState,350);
+}
+
+async function bootstrapRemote(){
+ setMode('A ligar ao Supabase…');
+ if(!supabaseConfigured()){
+   setMode('Modo local');
+   remoteReady=false;
+   render();
+   return;
+ }
+ try{
+   const rows=await sbFetch('app_state?id=eq.1&select=data,updated_at');
+   if(Array.isArray(rows)&&rows.length&&rows[0].data){
+     applySnapshot(rows[0].data);
+     // Mantém uma cópia local para recuperação/offline.
+     localStorage.setItem('cnc-v12',JSON.stringify({
+       clients:state.clients,machines:state.machines,employees:state.employees,
+       parts:state.parts,ops:state.ops,jobs:state.jobs
+     }));
+     localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
+   }else{
+     // Primeira execução: envia os dados deste navegador para o Supabase.
+     await sbFetch('app_state?on_conflict=id',{
+       method:'POST',
+       headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
+       body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])
+     });
+   }
+   remoteReady=true;
+   setMode('Supabase ligado',true);
+   render();
+ }catch(err){
+   console.error(err);
+   remoteReady=false;
+   setMode('Modo local — Supabase indisponível');
+   render();
+ }
+}
+
 let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null;const $=id=>document.getElementById(id);const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function save(){
  localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs}));
  localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
+ scheduleRemoteSave();
 }function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}
 function weekdayName(d){
  const names=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
@@ -379,7 +506,7 @@ $('delEmp').onclick=()=>{
  if(state.jobs.some(j=>[j.m,j.a,j.n].includes(editEmp)))return alert('Este colaborador está usado no planeamento.');
  state.employees=state.employees.filter(e=>e.id!==editEmp);save();$('empDlg').close();render();
 };
-$('prev').onclick=()=>{state.start=add(state.start,-14);gantt()};$('next').onclick=()=>{state.start=add(state.start,14);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());
+$('prev').onclick=()=>{state.start=add(state.start,-state.weeksVisible*7);gantt()};$('next').onclick=()=>{state.start=add(state.start,state.weeksVisible*7);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());
 state.weeksVisible=4;gantt()};tabs();
 function jobInfo(j){
  const o=op(j.op),p=part(o?.part),m=mach(j.machine);
@@ -432,6 +559,6 @@ $('clearSearch').onclick=()=>{
  renderSearch();
 };
 
-render();
+bootstrapRemote();
 
 $('weeksVisible')?.addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
