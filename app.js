@@ -24,7 +24,14 @@ let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null;const $=
 function save(){
  localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs}));
  localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
-}function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}function part(id){return state.parts.find(x=>x.id===id)}function op(id){return state.ops.find(x=>x.id===id)}function mach(id){return state.machines.find(x=>x.id===id)}function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}
+}function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}
+function weekdayName(d){
+ const names=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+ return names[d.getDay()];
+}
+function compactDate(d){
+ return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+}function part(id){return state.parts.find(x=>x.id===id)}function op(id){return state.ops.find(x=>x.id===id)}function mach(id){return state.machines.find(x=>x.id===id)}function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}
 function emp(id){return state.employees.find(x=>x.id===id)}
 function tm(s){
  if(!s)return 0;
@@ -111,7 +118,7 @@ function gantt(){
    let cls=(w===0||w===6)?'weekend':'';
    if(w===6)cls+=' saturday-toggle'+(saturdayActive(d)?' sat-active':'');
    if(w===0)cls+=' sunday-locked';
-   h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}">${esc(fmt(d))}</div>`;
+   h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}"><span class="weekday">${esc(weekdayName(d))}</span><span class="date-under">${esc(compactDate(d))}</span></div>`;
  }
  g.appendChild(h);
 

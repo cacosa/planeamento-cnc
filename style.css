@@ -115,3 +115,31 @@
 @media(max-width:700px){
   .breakrow{grid-template-columns:1fr}
 }
+
+
+/* V1.4a — cabeçalho compacto: dia em cima, data por baixo */
+#gantt{min-width:1580px}
+.hdr,.machine,.weekband{
+  grid-template-columns:155px repeat(14,minmax(100px,1fr));
+}
+.hdr>div{
+  padding:6px 4px;
+  line-height:1.05;
+}
+.hdr .weekday{
+  display:block;
+  font-size:13px;
+  font-weight:800;
+}
+.hdr .date-under{
+  display:block;
+  margin-top:4px;
+  font-size:12px;
+  font-weight:600;
+  color:#596273;
+}
+.hdr .saturday-toggle::after,
+.hdr .sunday-locked::after{
+  margin-top:4px;
+  font-size:9px;
+}
