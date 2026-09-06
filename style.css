@@ -40,3 +40,78 @@
 .bar{
   transition:left .12s ease,width .12s ease;
 }
+
+
+/* V1.4 — cabeçalho por semana + horários dos colaboradores */
+.weekband{
+  display:grid;
+  grid-template-columns:155px repeat(14,minmax(130px,1fr));
+  position:relative;
+}
+.weekband>div{
+  background:#dde3ea;
+  font-weight:800;
+  padding:8px 10px;
+  text-align:center;
+  border-right:1px solid var(--border);
+  border-bottom:1px solid var(--border);
+}
+.weekband .week-machine{
+  text-align:left;
+  position:sticky;
+  left:0;
+  z-index:7;
+}
+.weekband .week-span{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.breakrow{
+  display:grid;
+  grid-template-columns:1fr 1fr auto;
+  gap:8px;
+  align-items:end;
+  margin:8px 0;
+}
+.breakrow .danger{height:40px}
+.employee-hours{
+  font-size:12px;
+  color:var(--muted);
+}
+.hdr .saturday-toggle{
+  cursor:pointer;
+}
+.hdr .saturday-toggle::after{
+  content:"Sábado inativo";
+  display:block;
+  font-size:10px;
+  font-weight:500;
+  color:#6b7280;
+  margin-top:2px;
+}
+.hdr .saturday-toggle.sat-active{
+  background:#dcecdf;
+}
+.hdr .saturday-toggle.sat-active::after{
+  content:"Sábado ativo";
+  color:#245b34;
+  font-weight:700;
+}
+.hdr .sunday-locked::after{
+  content:"Sem trabalho";
+  display:block;
+  font-size:10px;
+  margin-top:2px;
+  color:#6b7280;
+}
+.cell.nonworking button{
+  cursor:not-allowed;
+  opacity:.16;
+}
+.cell.sat-active{
+  background:#eef7f0;
+}
+@media(max-width:700px){
+  .breakrow{grid-template-columns:1fr}
+}
