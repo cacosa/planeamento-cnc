@@ -1,11 +1,109 @@
 const seed={clients:[{id:'c1',name:'Cliente A'},{id:'c2',name:'Cliente B'}],machines:[{id:'m1',code:'SL30',group:'TORNOS'},{id:'m2',code:'V8300',group:'TORNOS'},{id:'m3',code:'UMC1000-1',group:'UMC1000'},{id:'m4',code:'UMC1000-2',group:'UMC1000'},{id:'m5',code:'UMC750-1',group:'UMC750'},{id:'m6',code:'UMC750-2',group:'UMC750'},{id:'m7',code:'UMC750-3',group:'UMC750'},{id:'m8',code:'VF3',group:'VF3'},{id:'m9',code:'EC1600',group:'EC1600'}],employees:[{id:'e1',name:'Sr. Silva',shift:'Manhã'},{id:'e2',name:'Andrii',shift:'Manhã'},{id:'e3',name:'José Gusmão',shift:'Manhã'},{id:'e4',name:'Tiago Gil',shift:'Tarde'},{id:'e5',name:'Diogo',shift:'Tarde'},{id:'e6',name:'Gonçalo',shift:'Noite'}],parts:[{id:'p1',code:'12345678',desc:'Carter 509',client:'c1'},{id:'p2',code:'87654321',desc:'Peça 510',client:'c2'}],ops:[{id:'o1',part:'p1',op:'OP10',min:28,setup:2,groups:['UMC750','UMC1000']},{id:'o2',part:'p1',op:'OP20',min:18,setup:2,groups:['UMC750','TORNOS']},{id:'o3',part:'p2',op:'OP10',min:32,setup:2,groups:['UMC750','UMC1000','TORNOS']}],jobs:[]};
-const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);state.start=startWeek(new Date());let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null;const $=id=>document.getElementById(id);const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function save(){localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs}))}function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}function part(id){return state.parts.find(x=>x.id===id)}function op(id){return state.ops.find(x=>x.id===id)}function mach(id){return state.machines.find(x=>x.id===id)}function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}function turns(j){return [j.m,j.a,j.n].filter(Boolean).length}function hrs(j){let o=op(j.op);return o?o.setup+j.qty*o.min/60:0}function dur(j){let t=turns(j);return t?hrs(j)/(8*t):0}function end(j){return new Date(pd(j.start).getTime()+dur(j)*86400000)}
+const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);
+state.saturdays=JSON.parse(localStorage.getItem('cnc-v13-saturdays')||'{}');
+state.start=startWeek(new Date());
+let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null;const $=id=>document.getElementById(id);const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function save(){
+ localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs}));
+ localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
+}function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}function part(id){return state.parts.find(x=>x.id===id)}function op(id){return state.ops.find(x=>x.id===id)}function mach(id){return state.machines.find(x=>x.id===id)}function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}
+function turns(j){return [j.m,j.a,j.n].filter(Boolean).length}
+function hrs(j){let o=op(j.op);return o?o.setup+j.qty*o.min/60:0}
+function saturdayActive(d){return !!state.saturdays[ds(d)]}
+function workingDay(d){
+ const w=d.getDay();
+ if(w===0)return false;
+ if(w===6)return saturdayActive(d);
+ return true;
+}
+function nextWorkingDay(d){
+ let x=new Date(d);
+ do{x=add(x,1)}while(!workingDay(x));
+ return x;
+}
+function normalizeStartDate(d){
+ let x=new Date(d);
+ while(!workingDay(x))x=add(x,1);
+ return x;
+}
+function end(j){
+ let remaining=hrs(j), t=turns(j);
+ if(!t)return pd(j.start);
+ let cap=8*t;
+ let cur=normalizeStartDate(pd(j.start));
+ while(remaining>cap+1e-9){
+   remaining-=cap;
+   cur=nextWorkingDay(cur);
+ }
+ return new Date(cur.getTime()+(remaining/cap)*86400000);
+}
+function dur(j){return (end(j)-pd(j.start))/86400000}
 function tabs(){document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));$(b.dataset.v).classList.add('active')});document.querySelectorAll('.close').forEach(b=>b.onclick=()=>$(b.dataset.d).close())}
 function render(){gantt();partsTable();clientsTable();peopleTable();fillPeople()}
-function gantt(){let e=add(state.start,13);$('period').textContent=`${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;let g=$('gantt');g.innerHTML='';let h=document.createElement('div');h.className='hdr';h.innerHTML='<div>Máquina</div>';for(let i=0;i<14;i++){let d=add(state.start,i),w=d.getDay();h.innerHTML+=`<div class="${w===0||w===6?'weekend':''}">${esc(fmt(d))}</div>`}g.appendChild(h);[...state.machines].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})).forEach(m=>{let r=document.createElement('div');r.className='machine';let n=document.createElement('div');n.className='mname';n.textContent=m.code;r.appendChild(n);for(let i=0;i<14;i++){let d=add(state.start,i),w=d.getDay(),c=document.createElement('div');c.className='cell'+((w===0||w===6)?' weekend':'');let b=document.createElement('button');b.textContent='+';b.onclick=()=>newJob(m.id,i);c.appendChild(b);r.appendChild(c)}let jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>pd(a.start)-pd(b.start));jobs.forEach((j,idx)=>{let off=Math.round((pd(j.start)-state.start)/86400000),dd=Math.max(.2,dur(j));if(off>13||off+dd<0)return;let s=Math.max(0,off),ee=Math.min(14,off+dd),v=ee-s,b=document.createElement('button');b.className='bar '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1');b.style.left=`calc(155px + (100% - 155px) * ${s/14})`;b.style.width=`calc((100% - 155px) * ${v/14} - 5px)`;let o=op(j.op),p=part(o?.part);b.innerHTML=`<strong>${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${turns(j)} turno(s) · ${hrs(j).toFixed(1)} h</span>`;b.onclick=()=>editJobOpen(j);r.appendChild(b)});g.appendChild(r)})}
+function gantt(){
+ let e=add(state.start,13);
+ $('period').textContent=`${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;
+ let g=$('gantt');g.innerHTML='';
+ let h=document.createElement('div');h.className='hdr';h.innerHTML='<div>Máquina</div>';
+ for(let i=0;i<14;i++){
+   let d=add(state.start,i),w=d.getDay();
+   let cls=(w===0||w===6)?'weekend':'';
+   if(w===6)cls+=' saturday-toggle'+(saturdayActive(d)?' sat-active':'');
+   if(w===0)cls+=' sunday-locked';
+   h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}">${esc(fmt(d))}</div>`;
+ }
+ g.appendChild(h);
+ h.querySelectorAll('.saturday-toggle').forEach(el=>{
+   el.addEventListener('click',()=>{
+     const i=Number(el.dataset.day),d=add(state.start,i),key=ds(d);
+     state.saturdays[key]=!state.saturdays[key];
+     save();
+     repushAll();
+     render();
+   });
+ });
+
+ [...state.machines].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})).forEach(m=>{
+   let r=document.createElement('div');r.className='machine';
+   let n=document.createElement('div');n.className='mname';n.textContent=m.code;r.appendChild(n);
+
+   for(let i=0;i<14;i++){
+     let d=add(state.start,i),w=d.getDay(),work=workingDay(d);
+     let c=document.createElement('div');
+     c.className='cell'+((w===0||w===6)?' weekend':'')+(w===6&&work?' sat-active':'')+(!work?' nonworking':'');
+     let bt=document.createElement('button');bt.textContent='+';
+     if(work)bt.onclick=()=>newJob(m.id,i);
+     else {
+       bt.disabled=true;
+       bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar';
+     }
+     c.appendChild(bt);r.appendChild(c);
+   }
+
+   let jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>pd(a.start)-pd(b.start));
+   jobs.forEach((j,idx)=>{
+     let off=Math.round((pd(j.start)-state.start)/86400000),
+         dd=Math.max(.2,dur(j));
+     if(off>13||off+dd<0)return;
+     let s=Math.max(0,off),ee=Math.min(14,off+dd),v=ee-s,b=document.createElement('button');
+     b.className='bar '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1');
+     b.style.left=`calc(155px + (100% - 155px) * ${s/14})`;
+     b.style.width=`calc((100% - 155px) * ${v/14} - 5px)`;
+     let o=op(j.op),p=part(o?.part);
+     b.innerHTML=`<strong>${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${turns(j)} turno(s) · ${hrs(j).toFixed(1)} h</span>`;
+     b.onclick=()=>editJobOpen(j);
+     r.appendChild(b);
+   });
+   g.appendChild(r);
+ });
+}
 function fillPeople(){[['morn','Manhã'],['aft','Tarde'],['night','Noite']].forEach(([id,sh])=>{let s=$(id),v=s.value;s.innerHTML='<option value="">— Sem operador —</option>'+state.employees.filter(e=>e.shift===sh).map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');s.value=v})}function allowed(mid){let mg=mach(mid)?.group;return state.ops.filter(o=>o.groups.includes(mg))}function fillOps(mid,current=''){let s=$('jobOp');s.innerHTML=allowed(mid).map(o=>{let p=part(o.part);return `<option value="${o.id}" ${o.id===current?'selected':''}>${esc(p.code)} · ${esc(o.op)} — ${o.min} min/pç</option>`}).join('')}
 function newJob(mid,day){
+ let requested=add(state.start,day);
+ if(!workingDay(requested)){
+   alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho do sábado para o ativar.');
+   return;
+ }
  editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j){
@@ -15,15 +113,37 @@ function formJob(){
  return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:ds(add(state.start,jobCtx.day)),m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value};
 }
 function forecast(){
- if(!$('jobOp').value)return;let j=formJob(),t=turns(j);$('forecast').textContent=t?`${hrs(j).toFixed(1)} h · ${t} turno(s) · cerca de ${dur(j).toFixed(1)} dia(s)`:`${hrs(j).toFixed(1)} h · escolha pelo menos um operador`;
+ if(!$('jobOp').value)return;
+ let j=formJob(),t=turns(j);
+ if(!t){
+   $('forecast').textContent=`${hrs(j).toFixed(1)} h · escolha pelo menos um operador`;
+   return;
+ }
+ let e=end(j);
+ $('forecast').textContent=`${hrs(j).toFixed(1)} h · ${t} turno(s) · fim previsto ${e.toLocaleDateString('pt-PT')} ${e.toLocaleTimeString('pt-PT',{hour:'2-digit',minute:'2-digit'})}`;
 }
 ['jobOp','jobQty','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
 $('jobForm').onsubmit=e=>{
  e.preventDefault();let j=formJob();if(!turns(j))return forecast();let i=state.jobs.findIndex(x=>x.id===j.id);if(i>=0)state.jobs[i]=j;else state.jobs.push(j);push(j.machine);save();$('jobDlg').close();render();
 };
 function push(mid){
- let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));for(let i=1;i<a.length;i++){let p=a[i-1],c=a[i];if(end(p)>pd(c.start))c.start=ds(new Date(Math.ceil(end(p).getTime()/86400000)*86400000));}
+ let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));
+ for(let i=0;i<a.length;i++){
+   let cur=a[i];
+   let ns=normalizeStartDate(pd(cur.start));
+   if(ds(ns)!==cur.start)cur.start=ds(ns);
+   if(i===0)continue;
+   let prev=a[i-1],prevEnd=end(prev),curStart=pd(cur.start);
+   if(prevEnd>curStart){
+     let next=new Date(prevEnd);
+     next.setHours(0,0,0,0);
+     if(prevEnd.getHours()||prevEnd.getMinutes()||prevEnd.getSeconds()||prevEnd.getMilliseconds())next=add(next,1);
+     next=normalizeStartDate(next);
+     cur.start=ds(next);
+   }
+ }
 }
+function repushAll(){state.machines.forEach(m=>push(m.id));save()}
 $('delJob').onclick=()=>{state.jobs=state.jobs.filter(j=>j.id!==editJob);save();$('jobDlg').close();render();};
 function partsTable(){$('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th></th></tr></thead><tbody>${state.parts.sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr><td><strong>${esc(p.code)}</strong></td><td>${esc(p.desc)}</td><td>${esc(cname(p.client))}</td><td>${state.ops.filter(o=>o.part===p.id).map(o=>`${esc(o.op)} · ${o.min} min`).join('<br>')}</td><td><button class="edit ep" data-id="${p.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id))}function groups(){return [...new Set(state.machines.map(m=>m.group))].sort()}function fillClients(){let s=$('pclient');s.innerHTML=state.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}function opRow(o={op:'OP10',min:10,setup:0,groups:[]}){let r=document.createElement('div');r.className='oprow';r.dataset.id=o.id||'';r.innerHTML=`<label>Operação<input class="oc" value="${esc(o.op)}"></label><div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Máquinas</div><div class="checks"></div></div><label>Min/pç<input class="om" type="number" min="0.1" step="0.1" value="${o.min}"></label><label>Setup h<input class="os" type="number" min="0" step="0.1" value="${o.setup}"></label><button type="button" class="danger ro">Remover</button>`;let c=r.querySelector('.checks');groups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${esc(g)}" ${o.groups.includes(g)?'checked':''}> ${esc(g)}</label>`);r.querySelector('.ro').onclick=()=>r.remove();$('ops').appendChild(r)}function partDlg(id=null){editPart=id;fillClients();$('ops').innerHTML='';$('perror').textContent='';if(id){let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;state.ops.filter(o=>o.part===id).forEach(opRow);$('delPart').classList.remove('hidden')}else{$('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';opRow();$('delPart').classList.add('hidden')}$('partDlg').showModal()}$('addPart').onclick=()=>partDlg();$('addOp').onclick=()=>opRow();$('partForm').onsubmit=e=>{e.preventDefault();let code=$('pcode').value.trim();if(!/^\d{8}$/.test(code))return $('perror').textContent='O código deve ter exatamente 8 dígitos.';if(state.parts.some(p=>p.code===code&&p.id!==editPart))return $('perror').textContent='Já existe uma peça com este código.';let rows=[...$('ops').querySelectorAll('.oprow')];if(!rows.length)return $('perror').textContent='Adicione pelo menos uma operação.';let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value},pi=state.parts.findIndex(x=>x.id===pid);if(pi>=0)state.parts[pi]=p;else state.parts.push(p);let keep=[];for(let r of rows){let gs=[...r.querySelectorAll('.checks input:checked')].map(x=>x.value);if(!gs.length)return $('perror').textContent='Cada operação precisa de pelo menos uma máquina.';let oid=r.dataset.id||uid('o');keep.push(oid);let n={id:oid,part:pid,op:r.querySelector('.oc').value.trim().toUpperCase(),min:+r.querySelector('.om').value,setup:+r.querySelector('.os').value,groups:gs},i=state.ops.findIndex(o=>o.id===oid);if(i>=0)state.ops[i]=n;else state.ops.push(n)}state.ops=state.ops.filter(o=>o.part!==pid||keep.includes(o.id));save();$('partDlg').close();render()};$('delPart').onclick=()=>{let ids=state.ops.filter(o=>o.part===editPart).map(o=>o.id);if(state.jobs.some(j=>ids.includes(j.op)))return $('perror').textContent='Esta peça está usada no planeamento.';state.ops=state.ops.filter(o=>o.part!==editPart);state.parts=state.parts.filter(p=>p.id!==editPart);save();$('partDlg').close();render()};
 function clientsTable(){$('clientsTable').innerHTML=`<table><thead><tr><th>Cliente</th><th></th></tr></thead><tbody>${state.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<tr><td>${esc(c.name)}</td><td><button class="edit ec" data-id="${c.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;document.querySelectorAll('.ec').forEach(b=>b.onclick=()=>clientDlg(b.dataset.id))}function clientDlg(id=null){editClient=id;let c=state.clients.find(x=>x.id===id);$('clientTitle').textContent=id?'Editar cliente':'Adicionar cliente';$('cname').value=c?.name||'';$('delClient').classList.toggle('hidden',!id);$('clientDlg').showModal()}$('addClient').onclick=()=>clientDlg();$('clientForm').onsubmit=e=>{e.preventDefault();let c={id:editClient||uid('c'),name:$('cname').value.trim()},i=state.clients.findIndex(x=>x.id===c.id);if(i>=0)state.clients[i]=c;else state.clients.push(c);save();$('clientDlg').close();render()};$('delClient').onclick=()=>{if(state.parts.some(p=>p.client===editClient))return alert('Este cliente está associado a peças.');state.clients=state.clients.filter(c=>c.id!==editClient);save();$('clientDlg').close();render()};
