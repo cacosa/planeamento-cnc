@@ -15,6 +15,10 @@ const shiftDefaults={
  'Tarde':{start:'15:00',end:'23:00',breaks:[{start:'18:00',end:'18:10'},{start:'20:30',end:'21:00'}]},
  'Noite':{start:'23:00',end:'07:00',breaks:[{start:'02:00',end:'02:10'},{start:'04:30',end:'05:00'}]}
 };
+state.jobs.forEach(job=>{
+ if(job.of===undefined)job.of='';
+ if(job.completedDate===undefined)job.completedDate=null;
+});
 state.employees.forEach(e=>{
  const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
  if(!e.start)e.start=d.start;
@@ -108,6 +112,10 @@ function canRunOnMachine(job,mid){
 function moveJobByDrag(jobId,mid,dateStr){
  let j=state.jobs.find(x=>x.id===jobId);
  if(!j)return;
+ if(j.status==='Concluída'){
+   alert('Esta produção está concluída e encontra-se bloqueada.');
+   return;
+ }
  let target=pd(dateStr);
  if(!workingDay(target)){
    alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o primeiro.');
@@ -213,15 +221,18 @@ function gantt(){
      b.style.width=`calc((100% - 155px) * ${v/totalDays} - 5px)`;
      let o=op(j.op),p=part(o?.part);
      const cap=typeof jobCapacityHours==='function'?fmtHours(jobCapacityHours(j)):`${turns(j)} turno(s)`;
-     b.innerHTML=`<strong>${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${cap}/dia · ${hrs(j).toFixed(1)} h</span>`;
-     b.draggable=true;
-     b.title='Arraste para alterar a data/máquina ou clique para editar';
-     b.addEventListener('dragstart',ev=>{
-       ev.dataTransfer.effectAllowed='move';
-       ev.dataTransfer.setData('text/plain',j.id);
-       b.classList.add('dragging');
-     });
-     b.addEventListener('dragend',()=>b.classList.remove('dragging'));
+     b.innerHTML=`<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${cap}/dia · ${hrs(j).toFixed(1)} h</span>`;
+     const locked=j.status==='Concluída';
+     b.draggable=!locked;
+     b.title=locked?'Produção concluída — bloqueada':'Arraste para alterar a data/máquina ou clique para editar';
+     if(!locked){
+       b.addEventListener('dragstart',ev=>{
+         ev.dataTransfer.effectAllowed='move';
+         ev.dataTransfer.setData('text/plain',j.id);
+         b.classList.add('dragging');
+       });
+       b.addEventListener('dragend',()=>b.classList.remove('dragging'));
+     }
      b.onclick=()=>editJobOpen(j);r.appendChild(b);
    });
    g.appendChild(r);
@@ -234,14 +245,14 @@ function newJob(mid,day){
    alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho do sábado para o ativar.');
    return;
  }
- editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(add(state.start,day));$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');forecast();$('jobDlg').showModal();
+ editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(add(state.start,day));$('jobOF').value='';$('jobCompletedDate').value='';$('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j){
- editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';$('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
+ editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobOF').value=j.of||'';$('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');$('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';$('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
  let chosen=$('jobDate').value||ds(add(state.start,jobCtx.day));
- return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value};
+ return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,completedDate:$('jobCompletedDate').value||null};
 }
 function forecast(){
  if(!$('jobOp').value)return;
@@ -254,16 +265,31 @@ function forecast(){
  $('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${e.toLocaleDateString('pt-PT')}`;
 }
 ['jobOp','jobQty','jobDate','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
+$('status').addEventListener('change',()=>{
+ const done=$('status').value==='Concluída';
+ $('completedDateWrap').classList.toggle('hidden',!done);
+ $('jobDate').disabled=done;
+ if(done&&!$('jobCompletedDate').value)$('jobCompletedDate').value=ds(new Date());
+ if(!done)$('jobCompletedDate').value='';
+ forecast();
+});
+
 $('jobForm').onsubmit=e=>{
  e.preventDefault();
  let j=formJob();
+ let old=state.jobs.find(x=>x.id===j.id);
+ if(old?.status==='Concluída'){
+   j.start=old.start;
+   j.machine=old.machine;
+ }
+ if(j.status==='Concluída'&&!j.completedDate)j.completedDate=ds(new Date());
+ if(j.status!=='Concluída')j.completedDate=null;
  let chosen=pd(j.start);
  if(!workingDay(chosen)){
    alert(chosen.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o no cabeçalho ou escolha outro dia.');
    return;
  }
  if(!turns(j))return forecast();
- let old=state.jobs.find(x=>x.id===j.id);
  let oldMachine=old?.machine;
  let i=state.jobs.findIndex(x=>x.id===j.id);
  if(i>=0)state.jobs[i]=j;else state.jobs.push(j);
@@ -354,6 +380,58 @@ $('delEmp').onclick=()=>{
  state.employees=state.employees.filter(e=>e.id!==editEmp);save();$('empDlg').close();render();
 };
 $('prev').onclick=()=>{state.start=add(state.start,-14);gantt()};$('next').onclick=()=>{state.start=add(state.start,14);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());
-state.weeksVisible=4;gantt()};tabs();render();
+state.weeksVisible=4;gantt()};tabs();
+function jobInfo(j){
+ const o=op(j.op),p=part(o?.part),m=mach(j.machine);
+ return{
+   of:j.of||'—',
+   part:p?.code||'—',
+   op:o?.op||'—',
+   machine:m?.code||'—',
+   qty:j.qty,
+   start:j.start,
+   finish:j.status==='Concluída'?(j.completedDate||ds(end(j))):ds(end(j)),
+   status:j.status
+ };
+}
+function renderSearch(){
+ const qOF=$('searchOF').value.trim().toLowerCase();
+ const qPart=$('searchPart').value.trim();
+ let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>{
+   const okOF=!qOF||String(x.info.of).toLowerCase().includes(qOF);
+   const okPart=!qPart||String(x.info.part).includes(qPart);
+   return okOF&&okPart;
+ }).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
+
+ $('searchSummary').textContent=rows.length?`${rows.length} registo(s) encontrado(s)`:'Nenhum registo encontrado';
+ $('searchResults').innerHTML=rows.length?`<table class="search-table">
+   <thead><tr><th>OF</th><th>Peça</th><th>OP</th><th>Máquina</th><th>Qtd.</th><th>Início</th><th>${rows.some(x=>x.info.status==='Concluída')?'Fim / conclusão':'Fim previsto'}</th><th>Estado</th></tr></thead>
+   <tbody>${rows.map(x=>`<tr>
+     <td><strong>${esc(x.info.of)}</strong></td>
+     <td>${esc(x.info.part)}</td>
+     <td>${esc(x.info.op)}</td>
+     <td>${esc(x.info.machine)}</td>
+     <td>${x.info.qty}</td>
+     <td>${pd(x.info.start).toLocaleDateString('pt-PT')}</td>
+     <td>${pd(x.info.finish).toLocaleDateString('pt-PT')}</td>
+     <td><span class="status-pill ${x.info.status==='Concluída'?'status-done':'status-planned'}">${esc(x.info.status)}</span></td>
+   </tr>`).join('')}</tbody>
+ </table>`:'';
+}
+$('openSearch').onclick=()=>{
+ $('searchOF').value='';
+ $('searchPart').value='';
+ renderSearch();
+ $('searchDlg').showModal();
+};
+$('searchOF').addEventListener('input',renderSearch);
+$('searchPart').addEventListener('input',renderSearch);
+$('clearSearch').onclick=()=>{
+ $('searchOF').value='';
+ $('searchPart').value='';
+ renderSearch();
+};
+
+render();
 
 $('weeksVisible')?.addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
