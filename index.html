@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planeamento CNC</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Planeamento CNC</h1>
+      <p>Gestão semanal de máquinas, peças, quantidades e operadores.</p>
+    </div>
+    <div class="week-controls">
+      <button id="prevWeek">← Semana</button>
+      <button id="todayWeek">Esta semana</button>
+      <button id="nextWeek">Semana →</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="toolbar">
+      <button class="tab active" data-view="planning">Planeamento</button>
+      <button class="tab" data-view="parts">Peças / Tempos</button>
+      <button class="tab" data-view="people">Colaboradores</button>
+      <button class="tab" data-view="machines">Máquinas</button>
+    </section>
+
+    <section id="planningView" class="view active-view">
+      <div class="planning-heading">
+        <div>
+          <h2 id="weekTitle">Semana</h2>
+          <p>Clique numa célula vazia para iniciar uma produção. Clique numa barra para editar.</p>
+        </div>
+      </div>
+
+      <div class="gantt-wrap">
+        <div id="gantt" class="gantt"></div>
+      </div>
+    </section>
+
+    <section id="partsView" class="view">
+      <div class="card">
+        <h2>Peças / Operações / Tempos</h2>
+        <p>Na V1, cada operação é planeada manualmente. As dependências automáticas ficam para a V2.</p>
+        <div id="partsTable"></div>
+      </div>
+    </section>
+
+    <section id="peopleView" class="view">
+      <div class="card">
+        <h2>Colaboradores</h2>
+        <p>Cada colaborador pertence a um turno. O planeador deduz a capacidade diária pelos operadores escolhidos.</p>
+        <div id="peopleTable"></div>
+      </div>
+    </section>
+
+    <section id="machinesView" class="view">
+      <div class="card">
+        <h2>Máquinas</h2>
+        <div id="machinesTable"></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="jobDialog">
+    <form method="dialog" id="jobForm">
+      <div class="dialog-head">
+        <div>
+          <h3 id="jobDialogTitle">Nova produção</h3>
+          <p id="jobDialogMeta"></p>
+        </div>
+        <button type="button" class="ghost" id="closeDialog">✕</button>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Peça / operação
+          <select id="partSelect" required></select>
+        </label>
+
+        <label>
+          Quantidade
+          <input id="qtyInput" type="number" min="1" value="20" required />
+        </label>
+
+        <label>
+          Operador — manhã
+          <select id="morningSelect"></select>
+        </label>
+
+        <label>
+          Operador — tarde
+          <select id="afternoonSelect"></select>
+        </label>
+
+        <label>
+          Operador — noite
+          <select id="nightSelect"></select>
+        </label>
+
+        <div class="forecast-box">
+          <span>Previsão</span>
+          <strong id="forecastText">—</strong>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="deleteJob" class="danger hidden">Eliminar</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancelDialog" class="secondary">Cancelar</button>
+        <button type="submit" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
