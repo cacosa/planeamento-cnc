@@ -143,3 +143,64 @@
   margin-top:4px;
   font-size:9px;
 }
+
+
+/* V1.5 — 2 / 4 / 6 semanas */
+.weeks-select{
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:6px;
+  font-weight:600;
+}
+.weeks-select select{
+  padding:8px 10px;
+  min-width:118px;
+}
+#gantt{
+  --day-min:82px;
+  min-width:0;
+  width:max-content;
+}
+#gantt.weeks-2{--day-min:96px}
+#gantt.weeks-4{--day-min:76px}
+#gantt.weeks-6{--day-min:68px}
+.ganttwrap{
+  overflow-x:auto;
+}
+.weekband,.hdr,.machine{
+  width:max-content;
+  min-width:100%;
+}
+.weekband .week-span{
+  border-left:2px solid #aeb7c3;
+}
+.weekband .week-span:first-of-type{
+  border-left:0;
+}
+.hdr>div:nth-child(8n+2),
+.machine>div:nth-child(8n+2){
+  border-left:2px solid #b8c0ca;
+}
+@media(max-width:1100px){
+  #gantt.weeks-4{--day-min:72px}
+  #gantt.weeks-6{--day-min:64px}
+}
+
+
+/* V1.6 — arrastar programação e editar data */
+.bar[draggable="true"]{
+  cursor:grab;
+}
+.bar.dragging{
+  opacity:.5;
+  cursor:grabbing;
+}
+.cell.drag-target{
+  outline:2px dashed var(--accent);
+  outline-offset:-3px;
+  background:#eef5ff !important;
+}
+#jobDate{
+  width:100%;
+}

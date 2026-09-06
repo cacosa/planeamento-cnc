@@ -9,6 +9,7 @@ const seed={clients:[{id:'c1',name:'Cliente A'},{id:'c2',name:'Cliente B'}],mach
 const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);
 state.saturdays=JSON.parse(localStorage.getItem('cnc-v13-saturdays')||'{}');
 state.start=startWeek(new Date());
+state.weeksVisible=4;
 const shiftDefaults={
  'Manhã':{start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
  'Tarde':{start:'15:00',end:'23:00',breaks:[{start:'18:00',end:'18:10'},{start:'20:30',end:'21:00'}]},
@@ -100,58 +101,127 @@ function isoWeek(d){
  return Math.ceil((((x-yearStart)/86400000)+1)/7);
 }
 function render(){gantt();partsTable();clientsTable();peopleTable();fillPeople()}
+function canRunOnMachine(job,mid){
+ let o=op(job.op),m=mach(mid);
+ return !!(o&&m&&o.groups.includes(m.group));
+}
+function moveJobByDrag(jobId,mid,dateStr){
+ let j=state.jobs.find(x=>x.id===jobId);
+ if(!j)return;
+ let target=pd(dateStr);
+ if(!workingDay(target)){
+   alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o primeiro.');
+   return;
+ }
+ if(!canRunOnMachine(j,mid)){
+   alert('Esta peça/operação não pode ser executada nesta máquina.');
+   return;
+ }
+ let oldMachine=j.machine;
+ j.machine=mid;
+ j.start=dateStr;
+ if(oldMachine!==mid)push(oldMachine);
+ push(mid);
+ save();
+ render();
+}
 function gantt(){
- let e=add(state.start,13);
+ const totalDays=state.weeksVisible*7;
+ let e=add(state.start,totalDays-1);
  $('period').textContent=`${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;
  let g=$('gantt');g.innerHTML='';
 
+ // Dynamic width according to the selected number of weeks.
+ g.style.setProperty('--days', String(totalDays));
+ g.classList.remove('weeks-2','weeks-4','weeks-6');
+ g.classList.add(`weeks-${state.weeksVisible}`);
+
  let wb=document.createElement('div');
  wb.className='weekband';
- wb.innerHTML=`<div class="week-machine">Máquina</div>
- <div class="week-span" style="grid-column:2 / span 7">Semana ${isoWeek(state.start)}</div>
- <div class="week-span" style="grid-column:9 / span 7">Semana ${isoWeek(add(state.start,7))}</div>`;
+ wb.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
+ let html='<div class="week-machine">Máquina</div>';
+ for(let w=0;w<state.weeksVisible;w++){
+   html+=`<div class="week-span" style="grid-column:${2+w*7} / span 7">Semana ${isoWeek(add(state.start,w*7))}</div>`;
+ }
+ wb.innerHTML=html;
  g.appendChild(wb);
 
- let h=document.createElement('div');h.className='hdr';h.innerHTML='<div>Data</div>';
- for(let i=0;i<14;i++){
+ let h=document.createElement('div');
+ h.className='hdr';
+ h.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
+ h.innerHTML='<div>Data</div>';
+ for(let i=0;i<totalDays;i++){
    let d=add(state.start,i),w=d.getDay();
    let cls=(w===0||w===6)?'weekend':'';
-   if(w===6)cls+=' saturday-toggle'+(saturdayActive(d)?' sat-active':'');
+   if(w===6)cls+=' saturday-toggle'+(typeof saturdayActive==='function'&&saturdayActive(d)?' sat-active':'');
    if(w===0)cls+=' sunday-locked';
    h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}"><span class="weekday">${esc(weekdayName(d))}</span><span class="date-under">${esc(compactDate(d))}</span></div>`;
  }
  g.appendChild(h);
 
- h.querySelectorAll('.saturday-toggle').forEach(el=>{
-   el.addEventListener('click',()=>{
-     const i=Number(el.dataset.day),d=add(state.start,i),key=ds(d);
-     state.saturdays[key]=!state.saturdays[key];
-     save();repushAll();render();
+ if(typeof saturdayActive==='function'){
+   h.querySelectorAll('.saturday-toggle').forEach(el=>{
+     el.addEventListener('click',()=>{
+       const i=Number(el.dataset.day),d=add(state.start,i),key=ds(d);
+       state.saturdays[key]=!state.saturdays[key];
+       save();
+       if(typeof repushAll==='function')repushAll();
+       render();
+     });
    });
- });
+ }
 
  [...state.machines].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})).forEach(m=>{
-   let r=document.createElement('div');r.className='machine';
+   let r=document.createElement('div');
+   r.className='machine';
+   r.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
+
    let n=document.createElement('div');n.className='mname';n.textContent=m.code;r.appendChild(n);
-   for(let i=0;i<14;i++){
-     let d=add(state.start,i),w=d.getDay(),work=workingDay(d);
+
+   for(let i=0;i<totalDays;i++){
+     let d=add(state.start,i),w=d.getDay();
+     let work=typeof workingDay==='function'?workingDay(d):true;
      let c=document.createElement('div');
      c.className='cell'+((w===0||w===6)?' weekend':'')+(w===6&&work?' sat-active':'')+(!work?' nonworking':'');
+     c.dataset.machine=m.id;
+     c.dataset.date=ds(d);
+     if(work){
+       c.addEventListener('dragover',ev=>{ev.preventDefault();c.classList.add('drag-target')});
+       c.addEventListener('dragleave',()=>c.classList.remove('drag-target'));
+       c.addEventListener('drop',ev=>{
+         ev.preventDefault();c.classList.remove('drag-target');
+         const id=ev.dataTransfer.getData('text/plain');
+         if(id)moveJobByDrag(id,m.id,ds(d));
+       });
+     }
      let bt=document.createElement('button');bt.textContent='+';
      if(work)bt.onclick=()=>newJob(m.id,i);
-     else{bt.disabled=true;bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar';}
+     else{
+       bt.disabled=true;
+       bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar';
+     }
      c.appendChild(bt);r.appendChild(c);
    }
+
    let jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>pd(a.start)-pd(b.start));
    jobs.forEach((j,idx)=>{
      let off=Math.round((pd(j.start)-state.start)/86400000),dd=Math.max(.2,dur(j));
-     if(off>13||off+dd<0)return;
-     let s=Math.max(0,off),ee=Math.min(14,off+dd),v=ee-s,b=document.createElement('button');
+     if(off>totalDays-1||off+dd<0)return;
+     let s=Math.max(0,off),ee=Math.min(totalDays,off+dd),v=ee-s,b=document.createElement('button');
      b.className='bar '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1');
-     b.style.left=`calc(155px + (100% - 155px) * ${s/14})`;
-     b.style.width=`calc((100% - 155px) * ${v/14} - 5px)`;
+     b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
+     b.style.width=`calc((100% - 155px) * ${v/totalDays} - 5px)`;
      let o=op(j.op),p=part(o?.part);
-     b.innerHTML=`<strong>${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${fmtHours(jobCapacityHours(j))}/dia · ${hrs(j).toFixed(1)} h</span>`;
+     const cap=typeof jobCapacityHours==='function'?fmtHours(jobCapacityHours(j)):`${turns(j)} turno(s)`;
+     b.innerHTML=`<strong>${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${cap}/dia · ${hrs(j).toFixed(1)} h</span>`;
+     b.draggable=true;
+     b.title='Arraste para alterar a data/máquina ou clique para editar';
+     b.addEventListener('dragstart',ev=>{
+       ev.dataTransfer.effectAllowed='move';
+       ev.dataTransfer.setData('text/plain',j.id);
+       b.classList.add('dragging');
+     });
+     b.addEventListener('dragend',()=>b.classList.remove('dragging'));
      b.onclick=()=>editJobOpen(j);r.appendChild(b);
    });
    g.appendChild(r);
@@ -164,13 +234,14 @@ function newJob(mid,day){
    alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho do sábado para o ativar.');
    return;
  }
- editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');forecast();$('jobDlg').showModal();
+ editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(add(state.start,day));$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j){
- editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';$('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
+ editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';$('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
- return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:ds(add(state.start,jobCtx.day)),m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value};
+ let chosen=$('jobDate').value||ds(add(state.start,jobCtx.day));
+ return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value};
 }
 function forecast(){
  if(!$('jobOp').value)return;
@@ -182,9 +253,23 @@ function forecast(){
  let e=end(j);
  $('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${e.toLocaleDateString('pt-PT')}`;
 }
-['jobOp','jobQty','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
+['jobOp','jobQty','jobDate','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
 $('jobForm').onsubmit=e=>{
- e.preventDefault();let j=formJob();if(!turns(j))return forecast();let i=state.jobs.findIndex(x=>x.id===j.id);if(i>=0)state.jobs[i]=j;else state.jobs.push(j);push(j.machine);save();$('jobDlg').close();render();
+ e.preventDefault();
+ let j=formJob();
+ let chosen=pd(j.start);
+ if(!workingDay(chosen)){
+   alert(chosen.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o no cabeçalho ou escolha outro dia.');
+   return;
+ }
+ if(!turns(j))return forecast();
+ let old=state.jobs.find(x=>x.id===j.id);
+ let oldMachine=old?.machine;
+ let i=state.jobs.findIndex(x=>x.id===j.id);
+ if(i>=0)state.jobs[i]=j;else state.jobs.push(j);
+ if(oldMachine&&oldMachine!==j.machine)push(oldMachine);
+ push(j.machine);
+ save();$('jobDlg').close();render();
 };
 function push(mid){
  let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));
@@ -268,4 +353,7 @@ $('delEmp').onclick=()=>{
  if(state.jobs.some(j=>[j.m,j.a,j.n].includes(editEmp)))return alert('Este colaborador está usado no planeamento.');
  state.employees=state.employees.filter(e=>e.id!==editEmp);save();$('empDlg').close();render();
 };
-$('prev').onclick=()=>{state.start=add(state.start,-14);gantt()};$('next').onclick=()=>{state.start=add(state.start,14);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());gantt()};tabs();render();
+$('prev').onclick=()=>{state.start=add(state.start,-14);gantt()};$('next').onclick=()=>{state.start=add(state.start,14);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());
+state.weeksVisible=4;gantt()};tabs();render();
+
+$('weeksVisible')?.addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
