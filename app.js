@@ -1,57 +1,89 @@
-const seed={clients:[{id:'c1',name:'Cliente A'},{id:'c2',name:'Cliente B'}],machines:[{id:'m1',code:'SL30',group:'TORNOS'},{id:'m2',code:'V8300',group:'TORNOS'},{id:'m3',code:'UMC1000-1',group:'UMC1000'},{id:'m4',code:'UMC1000-2',group:'UMC1000'},{id:'m5',code:'UMC750-1',group:'UMC750'},{id:'m6',code:'UMC750-2',group:'UMC750'},{id:'m7',code:'UMC750-3',group:'UMC750'},{id:'m8',code:'VF3',group:'VF3'},{id:'m9',code:'EC1600',group:'EC1600'}],employees:[
+const seed={
+clients:[{id:'c1',name:'Cliente A'},{id:'c2',name:'Cliente B'}],
+machines:[
+{id:'m1',code:'SL30',group:'SL30'},{id:'m2',code:'V8300',group:'V8300'},
+{id:'m3',code:'UMC1000-1',group:'UMC1000'},{id:'m4',code:'UMC1000-2',group:'UMC1000'},
+{id:'m5',code:'UMC750-1',group:'UMC750'},{id:'m6',code:'UMC750-2',group:'UMC750'},
+{id:'m7',code:'UMC750-3',group:'UMC750'},{id:'m8',code:'VF3',group:'VF3'},
+{id:'m9',code:'EC1600',group:'EC1600'},{id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia'}
+],
+employees:[
 {id:'e1',name:'Sr. Silva',shift:'Manhã',start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
 {id:'e2',name:'Andrii',shift:'Manhã',start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
 {id:'e3',name:'José Gusmão',shift:'Manhã',start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
 {id:'e4',name:'Tiago Gil',shift:'Tarde',start:'15:00',end:'23:00',breaks:[{start:'18:00',end:'18:10'},{start:'20:30',end:'21:00'}]},
 {id:'e5',name:'Diogo',shift:'Tarde',start:'15:00',end:'23:00',breaks:[{start:'18:00',end:'18:10'},{start:'20:30',end:'21:00'}]},
 {id:'e6',name:'Gonçalo',shift:'Noite',start:'23:00',end:'07:00',breaks:[{start:'02:00',end:'02:10'},{start:'04:30',end:'05:00'}]}
-],parts:[{id:'p1',code:'12345678',desc:'Carter 509',client:'c1'},{id:'p2',code:'87654321',desc:'Peça 510',client:'c2'}],ops:[{id:'o1',part:'p1',op:'OP10',min:28,setup:2,groups:['UMC750','UMC1000']},{id:'o2',part:'p1',op:'OP20',min:18,setup:2,groups:['UMC750','TORNOS']},{id:'o3',part:'p2',op:'OP10',min:32,setup:2,groups:['UMC750','UMC1000','TORNOS']}],jobs:[]};
+],
+parts:[
+{id:'p1',code:'12345678',desc:'Carter 509',client:'c1',accessories:[]},
+{id:'p2',code:'87654321',desc:'Peça 510',client:'c2',accessories:[]}
+],
+ops:[
+{id:'o1',part:'p1',op:'OP1',min:28,setup:2,groups:['UMC750','UMC1000']},
+{id:'o2',part:'p1',op:'OP2',min:18,setup:2,groups:['UMC750','SL30','V8300']},
+{id:'o3',part:'p2',op:'OP1',min:32,setup:2,groups:['UMC750','UMC1000','SL30','V8300']}
+],
+jobs:[],alerts:[]
+};
+
 const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);
 state.saturdays=JSON.parse(localStorage.getItem('cnc-v13-saturdays')||'{}');
 state.start=startWeek(new Date());
 state.weeksVisible=4;
+
 const shiftDefaults={
  'Manhã':{start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
  'Tarde':{start:'15:00',end:'23:00',breaks:[{start:'18:00',end:'18:10'},{start:'20:30',end:'21:00'}]},
  'Noite':{start:'23:00',end:'07:00',breaks:[{start:'02:00',end:'02:10'},{start:'04:30',end:'05:00'}]}
 };
-state.jobs.forEach(job=>{
- if(job.of===undefined)job.of='';
- if(job.completedDate===undefined)job.completedDate=null;
-});
-state.employees.forEach(e=>{
- const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
- if(!e.start)e.start=d.start;
- if(!e.end)e.end=d.end;
- if(!Array.isArray(e.breaks))e.breaks=structuredClone(d.breaks);
-});
 
-let remoteReady=false;
-let remoteSyncTimer=null;
-let remoteSyncBusy=false;
+const MACHINE_ORDER=['EC1600','VF3','UMC750-1','UMC750-2','UMC750-3','UMC1000-1','UMC1000-2','SL30','V8300','Serralharia'];
+const COMPAT_GROUPS=['EC1600','VF3','UMC750','UMC1000','SL30','V8300','SERRALHARIA'];
 
-function snapshotState(){
- return {
-   version:18,
-   clients:state.clients,
-   machines:state.machines,
-   employees:state.employees,
-   parts:state.parts,
-   ops:state.ops,
-   jobs:state.jobs,
-   saturdays:state.saturdays||{}
- };
+const $=id=>document.getElementById(id);
+const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}
+function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
+function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function pd(s){let [y,m,d]=String(s).split('-').map(Number);return new Date(y,m-1,d)}
+function compactDate(d){return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`}
+function weekdayName(d){return ['domingo','segunda','terça','quarta','quinta','sexta','sábado'][d.getDay()]}
+function part(id){return state.parts.find(x=>x.id===id)}
+function op(id){return state.ops.find(x=>x.id===id)}
+function mach(id){return state.machines.find(x=>x.id===id)}
+function emp(id){return state.employees.find(x=>x.id===id)}
+function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}
+function opNumber(v){let m=String(v||'').toUpperCase().match(/^OP\s*(\d+)$/);return m?Number(m[1]):9999}
+function machineOrder(m){let i=MACHINE_ORDER.indexOf(m.code);return i>=0?i:100+(m.order||0)}
+function machineGroupForCode(code,oldGroup){
+ if(code==='SL30')return 'SL30';
+ if(code==='V8300')return 'V8300';
+ if(code.startsWith('UMC750'))return 'UMC750';
+ if(code.startsWith('UMC1000'))return 'UMC1000';
+ if(code==='VF3')return 'VF3';
+ if(code==='EC1600')return 'EC1600';
+ if(code.toLowerCase()==='serralharia')return 'SERRALHARIA';
+ return oldGroup||'OUTRO';
 }
 
-function applySnapshot(data){
- if(!data||typeof data!=='object')return false;
- for(const k of ['clients','machines','employees','parts','ops','jobs']){
-   if(Array.isArray(data[k]))state[k]=data[k];
- }
- if(data.saturdays&&typeof data.saturdays==='object')state.saturdays=data.saturdays;
- state.jobs.forEach(job=>{
-   if(job.of===undefined)job.of='';
-   if(job.completedDate===undefined)job.completedDate=null;
+function normalizeState(){
+ state.clients=Array.isArray(state.clients)?state.clients:[];
+ state.machines=Array.isArray(state.machines)?state.machines:[];
+ state.employees=Array.isArray(state.employees)?state.employees:[];
+ state.parts=Array.isArray(state.parts)?state.parts:[];
+ state.ops=Array.isArray(state.ops)?state.ops:[];
+ state.jobs=Array.isArray(state.jobs)?state.jobs:[];
+ state.alerts=Array.isArray(state.alerts)?state.alerts:[];
+ state.saturdays=state.saturdays&&typeof state.saturdays==='object'?state.saturdays:{};
+
+ state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[]});
+ state.jobs.forEach(j=>{
+   if(j.of===undefined)j.of='';
+   if(j.completedDate===undefined)j.completedDate=null;
+   if(j.plannedEnd===undefined)j.plannedEnd=null;
  });
  state.employees.forEach(e=>{
    const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
@@ -59,506 +91,578 @@ function applySnapshot(data){
    if(!e.end)e.end=d.end;
    if(!Array.isArray(e.breaks))e.breaks=structuredClone(d.breaks);
  });
+
+ state.machines.forEach(m=>{
+   m.group=machineGroupForCode(m.code,m.group);
+   if(m.type===undefined)m.type=m.code.toLowerCase()==='serralharia'?'Serralharia':'CNC';
+   if(m.active===undefined)m.active=true;
+   m.order=machineOrder(m);
+ });
+ if(!state.machines.some(m=>m.code.toLowerCase()==='serralharia')){
+   state.machines.push({id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia',active:true,order:9});
+ }
+ state.ops.forEach(o=>{
+   let gs=Array.isArray(o.groups)?o.groups:[];
+   if(gs.includes('TORNOS'))gs=[...gs.filter(g=>g!=='TORNOS'),'SL30','V8300'];
+   o.groups=[...new Set(gs)];
+ });
+}
+normalizeState();
+
+let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
+function snapshotState(){
+ return {version:20,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{}};
+}
+function applySnapshot(data){
+ if(!data||typeof data!=='object')return false;
+ for(const k of ['clients','machines','employees','parts','ops','jobs','alerts'])if(Array.isArray(data[k]))state[k]=data[k];
+ if(data.saturdays&&typeof data.saturdays==='object')state.saturdays=data.saturdays;
+ normalizeState();
  return true;
 }
-
-function supabaseConfigured(){
- return !!(window.CNC_CONFIG?.SUPABASE_URL && window.CNC_CONFIG?.SUPABASE_KEY);
-}
-
+function supabaseConfigured(){return !!(window.CNC_CONFIG?.SUPABASE_URL&&window.CNC_CONFIG?.SUPABASE_KEY)}
 async function sbFetch(path,options={}){
  const base=window.CNC_CONFIG.SUPABASE_URL.replace(/\/$/,'');
- const headers={
-   apikey:window.CNC_CONFIG.SUPABASE_KEY,
-   Authorization:`Bearer ${window.CNC_CONFIG.SUPABASE_KEY}`,
-   'Content-Type':'application/json',
-   ...(options.headers||{})
- };
+ const headers={apikey:window.CNC_CONFIG.SUPABASE_KEY,Authorization:`Bearer ${window.CNC_CONFIG.SUPABASE_KEY}`,'Content-Type':'application/json',...(options.headers||{})};
  const res=await fetch(`${base}/rest/v1/${path}`,{...options,headers});
- if(!res.ok){
-   const text=await res.text();
-   throw new Error(`Supabase ${res.status}: ${text}`);
- }
- const txt=await res.text();
- return txt?JSON.parse(txt):null;
+ if(!res.ok)throw new Error(`Supabase ${res.status}: ${await res.text()}`);
+ const txt=await res.text();return txt?JSON.parse(txt):null;
 }
-
-function setMode(text,ok=false){
- const el=document.getElementById('mode');
- if(!el)return;
- el.textContent=text;
- el.classList.toggle('online',ok);
-}
-
+function setMode(text,ok=false){if(!$('mode'))return;$('mode').textContent=text;$('mode').classList.toggle('online',ok)}
 async function writeRemoteState(){
  if(!remoteReady||remoteSyncBusy)return;
  remoteSyncBusy=true;
  try{
-   await sbFetch('app_state?on_conflict=id',{
-     method:'POST',
-     headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
-     body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])
-   });
+   await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
    setMode('Supabase ligado',true);
- }catch(err){
-   console.error(err);
-   setMode('Erro de sincronização');
- }finally{
-   remoteSyncBusy=false;
- }
+ }catch(err){console.error(err);setMode('Erro de sincronização')}
+ finally{remoteSyncBusy=false}
 }
-
-function scheduleRemoteSave(){
- if(!remoteReady)return;
- clearTimeout(remoteSyncTimer);
- remoteSyncTimer=setTimeout(writeRemoteState,350);
+function scheduleRemoteSave(){if(!remoteReady)return;clearTimeout(remoteSyncTimer);remoteSyncTimer=setTimeout(writeRemoteState,350)}
+function save(){
+ localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts}));
+ localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
+ scheduleRemoteSave();
 }
-
 async function bootstrapRemote(){
  setMode('A ligar ao Supabase…');
- if(!supabaseConfigured()){
-   setMode('Modo local');
-   remoteReady=false;
-   render();
-   return;
- }
+ if(!supabaseConfigured()){remoteReady=false;setMode('Modo local');render();return}
  try{
    const rows=await sbFetch('app_state?id=eq.1&select=data,updated_at');
    if(Array.isArray(rows)&&rows.length&&rows[0].data){
      applySnapshot(rows[0].data);
-     // Mantém uma cópia local para recuperação/offline.
-     localStorage.setItem('cnc-v12',JSON.stringify({
-       clients:state.clients,machines:state.machines,employees:state.employees,
-       parts:state.parts,ops:state.ops,jobs:state.jobs
-     }));
+     localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts}));
      localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
    }else{
-     // Primeira execução: envia os dados deste navegador para o Supabase.
-     await sbFetch('app_state?on_conflict=id',{
-       method:'POST',
-       headers:{Prefer:'resolution=merge-duplicates,return=minimal'},
-       body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])
-     });
+     await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
    }
-   remoteReady=true;
-   setMode('Supabase ligado',true);
-   render();
- }catch(err){
-   console.error(err);
-   remoteReady=false;
-   setMode('Modo local — Supabase indisponível');
-   render();
- }
+   remoteReady=true;setMode('Supabase ligado',true);render();
+ }catch(err){console.error(err);remoteReady=false;setMode('Modo local — Supabase indisponível');render()}
 }
 
-let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null;const $=id=>document.getElementById(id);const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function save(){
- localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs}));
- localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
- scheduleRemoteSave();
-}function startWeek(d){d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d}function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}function pd(s){let [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}function fmt(d){return new Intl.DateTimeFormat('pt-PT',{weekday:'short',day:'2-digit',month:'2-digit'}).format(d)}
-function weekdayName(d){
- const names=['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
- return names[d.getDay()];
-}
-function compactDate(d){
- return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-}function part(id){return state.parts.find(x=>x.id===id)}function op(id){return state.ops.find(x=>x.id===id)}function mach(id){return state.machines.find(x=>x.id===id)}function cname(id){return state.clients.find(x=>x.id===id)?.name||'—'}
-function emp(id){return state.employees.find(x=>x.id===id)}
-function tm(s){
- if(!s)return 0;
- let [h,m]=s.split(':').map(Number);
- return h*60+m;
-}
-function shiftMinutes(e){
- if(!e)return 0;
- let a=tm(e.start),b=tm(e.end);
- if(b<=a)b+=1440;
- return b-a;
-}
-function breakMinutes(e){
- return (e?.breaks||[]).reduce((sum,b)=>{
-   let a=tm(b.start),z=tm(b.end);
-   if(z<a)z+=1440;
-   return sum+Math.max(0,z-a);
- },0);
-}
-function netHours(e){
- return Math.max(0,(shiftMinutes(e)-breakMinutes(e))/60);
-}
-function jobCapacityHours(j){
- return [j.m,j.a,j.n].filter(Boolean).reduce((sum,id)=>sum+netHours(emp(id)),0);
-}
-function fmtHours(h){
- let mins=Math.round(h*60),hh=Math.floor(mins/60),mm=mins%60;
- return `${hh} h ${String(mm).padStart(2,'0')} min`;
-}
+function tm(s){if(!s)return 0;let [h,m]=s.split(':').map(Number);return h*60+m}
+function shiftMinutes(e){if(!e)return 0;let a=tm(e.start),b=tm(e.end);if(b<=a)b+=1440;return b-a}
+function breakMinutes(e){return (e?.breaks||[]).reduce((sum,b)=>{let a=tm(b.start),z=tm(b.end);if(z<a)z+=1440;return sum+Math.max(0,z-a)},0)}
+function netHours(e){return Math.max(0,(shiftMinutes(e)-breakMinutes(e))/60)}
+function jobCapacityHours(j){return [j.m,j.a,j.n].filter(Boolean).reduce((sum,id)=>sum+netHours(emp(id)),0)}
+function fmtHours(h){let mins=Math.round(h*60),hh=Math.floor(mins/60),mm=mins%60;return `${hh} h ${String(mm).padStart(2,'0')} min`}
 function turns(j){return [j.m,j.a,j.n].filter(Boolean).length}
 function hrs(j){let o=op(j.op);return o?o.setup+j.qty*o.min/60:0}
+
 function saturdayActive(d){return !!state.saturdays[ds(d)]}
-function workingDay(d){
- const w=d.getDay();
- if(w===0)return false;
- if(w===6)return saturdayActive(d);
- return true;
-}
-function nextWorkingDay(d){
- let x=new Date(d);
- do{x=add(x,1)}while(!workingDay(x));
- return x;
-}
-function normalizeStartDate(d){
- let x=new Date(d);
- while(!workingDay(x))x=add(x,1);
- return x;
+function workingDay(d){let w=d.getDay();if(w===0)return false;if(w===6)return saturdayActive(d);return true}
+function nextWorkingDay(d){let x=new Date(d);do{x=add(x,1)}while(!workingDay(x));return x}
+function normalizeStartDate(d){let x=new Date(d);while(!workingDay(x))x=add(x,1);return x}
+
+function jobWorkSegments(j){
+ let remaining=hrs(j),cap=jobCapacityHours(j),segments=[];
+ if(cap<=0)return segments;
+ let cur=normalizeStartDate(pd(j.start)),guard=0;
+ while(remaining>1e-9&&guard++<1000){
+   let used=Math.min(cap,remaining);
+   segments.push({date:new Date(cur),frac:Math.min(1,used/cap)});
+   remaining-=used;
+   if(remaining>1e-9)cur=nextWorkingDay(cur);
+ }
+ return segments;
 }
 function end(j){
- let remaining=hrs(j),cap=jobCapacityHours(j);
- if(cap<=0)return pd(j.start);
- let cur=normalizeStartDate(pd(j.start));
- while(remaining>cap+1e-9){
-   remaining-=cap;
-   cur=nextWorkingDay(cur);
- }
- return new Date(cur.getTime()+(remaining/cap)*86400000);
+ let segs=jobWorkSegments(j);
+ if(!segs.length)return pd(j.start);
+ let last=segs[segs.length-1];
+ return new Date(last.date.getTime()+last.frac*86400000);
 }
+function jobLastWorkDate(j){
+ let segs=jobWorkSegments(j);
+ return segs.length?segs[segs.length-1].date:pd(j.start);
+}
+function nextStartAfterJob(j){return nextWorkingDay(jobLastWorkDate(j))}
 function dur(j){return (end(j)-pd(j.start))/86400000}
-function tabs(){document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));$(b.dataset.v).classList.add('active')});document.querySelectorAll('.close').forEach(b=>b.onclick=()=>$(b.dataset.d).close())}
+
 function isoWeek(d){
  const x=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
- const day=x.getUTCDay()||7;
- x.setUTCDate(x.getUTCDate()+4-day);
+ const day=x.getUTCDay()||7;x.setUTCDate(x.getUTCDate()+4-day);
  const yearStart=new Date(Date.UTC(x.getUTCFullYear(),0,1));
  return Math.ceil((((x-yearStart)/86400000)+1)/7);
 }
-function render(){gantt();partsTable();clientsTable();peopleTable();fillPeople()}
-function canRunOnMachine(job,mid){
- let o=op(job.op),m=mach(mid);
- return !!(o&&m&&o.groups.includes(m.group));
+
+function tabs(){
+ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
+   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));
+   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+   $(b.dataset.v).classList.add('active');
+ });
+ document.querySelectorAll('.close').forEach(b=>b.onclick=()=>$(b.dataset.d).close());
 }
+
+function render(){
+ gantt();partsTable();clientsTable();machinesTable();peopleTable();fillPeople();renderAlertBadge();
+}
+
+function canRunOnMachine(job,mid){let o=op(job.op),m=mach(mid);return !!(o&&m&&o.groups.includes(m.group))}
+function allowed(mid){let mg=mach(mid)?.group;return state.ops.filter(o=>o.groups.includes(mg))}
+
+function fillPeople(){
+ [['morn','Manhã'],['aft','Tarde'],['night','Noite']].forEach(([id,sh])=>{
+   let s=$(id),v=s.value;
+   s.innerHTML='<option value="">— Sem operador —</option>'+state.employees.filter(e=>e.shift===sh).map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');
+   s.value=v;
+ });
+}
+function fillOps(mid,current=''){
+ let s=$('jobOp');
+ let options=allowed(mid).sort((a,b)=>{
+   let pa=part(a.part),pb=part(b.part);
+   return (pa?.code||'').localeCompare(pb?.code||'')||opNumber(a.op)-opNumber(b.op);
+ });
+ s.innerHTML=options.map(o=>{
+   let p=part(o.part);
+   return `<option value="${o.id}" ${o.id===current?'selected':''}>${esc(p?.code)} - ${esc(p?.desc)} - ${esc(o.op)} - ${o.min} min/pç</option>`;
+ }).join('');
+ if(!options.length)s.innerHTML='<option value="">Nenhuma peça/operação compatível com esta máquina</option>';
+}
+
+function sequenceCheck(j){
+ let curOp=op(j.op),n=opNumber(curOp?.op);
+ if(!curOp||n<=1||n===9999)return {ok:true};
+ if(!j.of)return {ok:true};
+ let prevOp=state.ops.find(o=>o.part===curOp.part&&opNumber(o.op)===n-1);
+ if(!prevOp)return {ok:true};
+ let prevJob=state.jobs
+   .filter(x=>x.id!==j.id&&x.of===j.of&&x.op===prevOp.id)
+   .sort((a,b)=>pd(b.start)-pd(a.start))[0];
+ if(!prevJob)return {ok:false,msg:`${curOp.op} não pode ser planeada antes de ${prevOp.op}. Não encontrei ${prevOp.op} para a OF ${j.of}.`};
+ let earliest=prevJob.status==='Concluída'&&prevJob.completedDate?nextWorkingDay(pd(prevJob.completedDate)):nextStartAfterJob(prevJob);
+ if(pd(j.start)<earliest){
+   return {ok:false,msg:`${curOp.op} só pode iniciar depois de ${prevOp.op}. Primeira data válida: ${earliest.toLocaleDateString('pt-PT')}.`,earliest};
+ }
+ return {ok:true};
+}
+
 function moveJobByDrag(jobId,mid,dateStr){
  let j=state.jobs.find(x=>x.id===jobId);
  if(!j)return;
- if(j.status==='Concluída'){
-   alert('Esta produção está concluída e encontra-se bloqueada.');
-   return;
- }
+ if(j.status==='Concluída')return alert('Esta produção está concluída e encontra-se bloqueada.');
  let target=pd(dateStr);
- if(!workingDay(target)){
-   alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o primeiro.');
-   return;
- }
- if(!canRunOnMachine(j,mid)){
-   alert('Esta peça/operação não pode ser executada nesta máquina.');
-   return;
- }
- let oldMachine=j.machine;
- j.machine=mid;
- j.start=dateStr;
- if(oldMachine!==mid)push(oldMachine);
- push(mid);
- save();
- render();
+ if(!workingDay(target))return alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o primeiro.');
+ if(!canRunOnMachine(j,mid))return alert('Esta peça/operação não pode ser executada nesta máquina.');
+ let test={...j,machine:mid,start:dateStr},seq=sequenceCheck(test);
+ if(!seq.ok)return alert(seq.msg);
+ let oldMachine=j.machine;j.machine=mid;j.start=dateStr;
+ if(oldMachine!==mid)push(oldMachine);push(mid);save();render();
 }
+
+function jobRuns(j){
+ const segs=jobWorkSegments(j);
+ let runs=[];
+ for(const seg of segs){
+   let last=runs[runs.length-1];
+   if(last&&Math.round((seg.date-last.lastDate)/86400000)===1){
+     last.days+=1;last.lastFrac=seg.frac;last.lastDate=seg.date;
+   }else{
+     runs.push({startDate:seg.date,lastDate:seg.date,days:1,lastFrac:seg.frac});
+   }
+ }
+ return runs;
+}
+
 function gantt(){
  const totalDays=state.weeksVisible*7;
  let e=add(state.start,totalDays-1);
  $('period').textContent=`${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;
  let g=$('gantt');g.innerHTML='';
+ g.style.setProperty('--days',String(totalDays));
+ g.classList.remove('weeks-2','weeks-4','weeks-6');g.classList.add(`weeks-${state.weeksVisible}`);
 
- // Dynamic width according to the selected number of weeks.
- g.style.setProperty('--days', String(totalDays));
- g.classList.remove('weeks-2','weeks-4','weeks-6');
- g.classList.add(`weeks-${state.weeksVisible}`);
+ let wb=document.createElement('div');wb.className='weekband';
+ wb.style.gridTemplateColumns=`155px repeat(${totalDays},minmax(var(--day-min),1fr))`;
+ let wh='<div class="week-machine">Máquina</div>';
+ for(let w=0;w<state.weeksVisible;w++)wh+=`<div class="week-span" style="grid-column:${2+w*7} / span 7">Semana ${isoWeek(add(state.start,w*7))}</div>`;
+ wb.innerHTML=wh;g.appendChild(wb);
 
- let wb=document.createElement('div');
- wb.className='weekband';
- wb.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
- let html='<div class="week-machine">Máquina</div>';
- for(let w=0;w<state.weeksVisible;w++){
-   html+=`<div class="week-span" style="grid-column:${2+w*7} / span 7">Semana ${isoWeek(add(state.start,w*7))}</div>`;
- }
- wb.innerHTML=html;
- g.appendChild(wb);
-
- let h=document.createElement('div');
- h.className='hdr';
- h.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
- h.innerHTML='<div>Data</div>';
+ let h=document.createElement('div');h.className='hdr';
+ h.style.gridTemplateColumns=`155px repeat(${totalDays},minmax(var(--day-min),1fr))`;h.innerHTML='<div>Data</div>';
  for(let i=0;i<totalDays;i++){
-   let d=add(state.start,i),w=d.getDay();
-   let cls=(w===0||w===6)?'weekend':'';
-   if(w===6)cls+=' saturday-toggle'+(typeof saturdayActive==='function'&&saturdayActive(d)?' sat-active':'');
+   let d=add(state.start,i),w=d.getDay(),cls=(w===0||w===6)?'weekend':'';
+   if(w===6)cls+=' saturday-toggle'+(saturdayActive(d)?' sat-active':'');
    if(w===0)cls+=' sunday-locked';
    h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}"><span class="weekday">${esc(weekdayName(d))}</span><span class="date-under">${esc(compactDate(d))}</span></div>`;
  }
  g.appendChild(h);
+ h.querySelectorAll('.saturday-toggle').forEach(el=>el.addEventListener('click',()=>{
+   let d=add(state.start,Number(el.dataset.day)),key=ds(d);state.saturdays[key]=!state.saturdays[key];
+   repushAll();save();render();
+ }));
 
- if(typeof saturdayActive==='function'){
-   h.querySelectorAll('.saturday-toggle').forEach(el=>{
-     el.addEventListener('click',()=>{
-       const i=Number(el.dataset.day),d=add(state.start,i),key=ds(d);
-       state.saturdays[key]=!state.saturdays[key];
-       save();
-       if(typeof repushAll==='function')repushAll();
-       render();
-     });
-   });
- }
-
- [...state.machines].sort((a,b)=>a.code.localeCompare(b.code,undefined,{numeric:true})).forEach(m=>{
-   let r=document.createElement('div');
-   r.className='machine';
-   r.style.gridTemplateColumns=`155px repeat(${totalDays}, minmax(var(--day-min),1fr))`;
-
+ let machines=[...state.machines].filter(m=>m.active!==false).sort((a,b)=>machineOrder(a)-machineOrder(b));
+ machines.forEach((m,mi)=>{
+   let r=document.createElement('div');r.className='machine'+(mi&&[1,2,5,7,9].includes(mi)?' gantt-row-separator':'');
+   r.style.gridTemplateColumns=`155px repeat(${totalDays},minmax(var(--day-min),1fr))`;
    let n=document.createElement('div');n.className='mname';n.textContent=m.code;r.appendChild(n);
 
    for(let i=0;i<totalDays;i++){
-     let d=add(state.start,i),w=d.getDay();
-     let work=typeof workingDay==='function'?workingDay(d):true;
-     let c=document.createElement('div');
+     let d=add(state.start,i),w=d.getDay(),work=workingDay(d),c=document.createElement('div');
      c.className='cell'+((w===0||w===6)?' weekend':'')+(w===6&&work?' sat-active':'')+(!work?' nonworking':'');
-     c.dataset.machine=m.id;
-     c.dataset.date=ds(d);
+     c.dataset.machine=m.id;c.dataset.date=ds(d);
      if(work){
        c.addEventListener('dragover',ev=>{ev.preventDefault();c.classList.add('drag-target')});
        c.addEventListener('dragleave',()=>c.classList.remove('drag-target'));
-       c.addEventListener('drop',ev=>{
-         ev.preventDefault();c.classList.remove('drag-target');
-         const id=ev.dataTransfer.getData('text/plain');
-         if(id)moveJobByDrag(id,m.id,ds(d));
-       });
+       c.addEventListener('drop',ev=>{ev.preventDefault();c.classList.remove('drag-target');let id=ev.dataTransfer.getData('text/plain');if(id)moveJobByDrag(id,m.id,ds(d))});
      }
      let bt=document.createElement('button');bt.textContent='+';
-     if(work)bt.onclick=()=>newJob(m.id,i);
-     else{
-       bt.disabled=true;
-       bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar';
-     }
+     if(work)bt.onclick=()=>newJob(m.id,i);else{bt.disabled=true;bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar'}
      c.appendChild(bt);r.appendChild(c);
    }
 
    let jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>pd(a.start)-pd(b.start));
    jobs.forEach((j,idx)=>{
-     let off=Math.round((pd(j.start)-state.start)/86400000),dd=Math.max(.2,dur(j));
-     if(off>totalDays-1||off+dd<0)return;
-     let s=Math.max(0,off),ee=Math.min(totalDays,off+dd),v=ee-s,b=document.createElement('button');
-     b.className='bar '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1');
-     b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
-     b.style.width=`calc((100% - 155px) * ${v/totalDays} - 5px)`;
-     let o=op(j.op),p=part(o?.part);
-     const cap=typeof jobCapacityHours==='function'?fmtHours(jobCapacityHours(j)):`${turns(j)} turno(s)`;
-     b.innerHTML=`<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span>${cap}/dia · ${hrs(j).toFixed(1)} h</span>`;
-     const locked=j.status==='Concluída';
-     b.draggable=!locked;
-     b.title=locked?'Produção concluída — bloqueada':'Arraste para alterar a data/máquina ou clique para editar';
-     if(!locked){
-       b.addEventListener('dragstart',ev=>{
-         ev.dataTransfer.effectAllowed='move';
-         ev.dataTransfer.setData('text/plain',j.id);
-         b.classList.add('dragging');
-       });
-       b.addEventListener('dragend',()=>b.classList.remove('dragging'));
-     }
-     b.onclick=()=>editJobOpen(j);r.appendChild(b);
+     let o=op(j.op),p=part(o?.part),runs=jobRuns(j),labelDone=false;
+     let names=[j.m,j.a,j.n].filter(Boolean).map(id=>emp(id)?.name).filter(Boolean).join(', ')||'Sem operador';
+     let tooltip=[
+       `OF: ${j.of||'—'}`,`Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,
+       `Quantidade: ${j.qty}`,`Tempo: ${hrs(j).toFixed(1)} h`,`Capacidade: ${fmtHours(jobCapacityHours(j))}/dia`,
+       `Operadores: ${names}`,`Início: ${pd(j.start).toLocaleDateString('pt-PT')}`,
+       `Fim previsto: ${jobLastWorkDate(j).toLocaleDateString('pt-PT')}`,
+       j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:''
+     ].filter(Boolean).join('\n');
+
+     runs.forEach(run=>{
+       let off=Math.round((run.startDate-state.start)/86400000);
+       let width=(run.days-1)+run.lastFrac;
+       if(off>totalDays-1||off+width<0)return;
+       let s=Math.max(0,off),ee=Math.min(totalDays,off+width),v=ee-s;
+       if(v<=0)return;
+       let b=document.createElement('button');
+       b.className='bar segment '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1')+(labelDone?' blank':'');
+       b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
+       b.style.width=`calc((100% - 155px) * ${v/totalDays} - 3px)`;
+       if(!labelDone){
+         b.innerHTML=`<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span class="bar-name">${esc(p?.desc||'')}</span>`;
+         labelDone=true;
+       }
+       b.title=tooltip;
+       let locked=j.status==='Concluída';b.draggable=!locked;
+       if(!locked){
+         b.addEventListener('dragstart',ev=>{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',j.id);b.classList.add('dragging')});
+         b.addEventListener('dragend',()=>b.classList.remove('dragging'));
+       }
+       b.onclick=()=>editJobOpen(j);r.appendChild(b);
+     });
    });
    g.appendChild(r);
  });
 }
-function fillPeople(){[['morn','Manhã'],['aft','Tarde'],['night','Noite']].forEach(([id,sh])=>{let s=$(id),v=s.value;s.innerHTML='<option value="">— Sem operador —</option>'+state.employees.filter(e=>e.shift===sh).map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');s.value=v})}function allowed(mid){let mg=mach(mid)?.group;return state.ops.filter(o=>o.groups.includes(mg))}function fillOps(mid,current=''){let s=$('jobOp');s.innerHTML=allowed(mid).map(o=>{let p=part(o.part);return `<option value="${o.id}" ${o.id===current?'selected':''}>${esc(p.code)} · ${esc(o.op)} — ${o.min} min/pç</option>`}).join('')}
+
+let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null,editMachine=null;
+
 function newJob(mid,day){
  let requested=add(state.start,day);
- if(!workingDay(requested)){
-   alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho do sábado para o ativar.');
-   return;
- }
- editJob=null;jobCtx={mid,day};$('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${fmt(add(state.start,day))}`;fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(add(state.start,day));$('jobOF').value='';$('jobCompletedDate').value='';$('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
+ if(!workingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho para o ativar.');
+ editJob=null;jobCtx={mid,day};$('jobError').textContent='';
+ $('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${requested.toLocaleDateString('pt-PT')}`;
+ fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobOF').value='';$('jobCompletedDate').value='';
+ $('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';
+ $('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j){
- editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobOF').value=j.of||'';$('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');$('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';$('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
+ editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
+ $('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;
+ fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobOF').value=j.of||'';
+ $('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
+ $('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';
+ $('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
- let chosen=$('jobDate').value||ds(add(state.start,jobCtx.day));
- return{id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,completedDate:$('jobCompletedDate').value||null};
+ let old=state.jobs.find(x=>x.id===editJob);
+ let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day));
+ return {id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),
+   start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
+   completedDate:$('jobCompletedDate').value||null,plannedEnd:old?.plannedEnd||null};
 }
 function forecast(){
- if(!$('jobOp').value)return;
+ if(!$('jobOp').value){$('forecast').textContent='Sem operação compatível';return}
  let j=formJob(),cap=jobCapacityHours(j);
- if(cap<=0){
-   $('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · escolha pelo menos um operador`;
-   return;
- }
- let e=end(j);
- $('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${e.toLocaleDateString('pt-PT')}`;
+ if(cap<=0){$('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · escolha pelo menos um operador`;return}
+ let seq=sequenceCheck(j);
+ let txt=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${jobLastWorkDate(j).toLocaleDateString('pt-PT')}`;
+ if(!seq.ok)txt+=` · ⚠ ${seq.msg}`;
+ $('forecast').textContent=txt;
 }
-['jobOp','jobQty','jobDate','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
+['jobOp','jobQty','jobDate','jobOF','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
 $('status').addEventListener('change',()=>{
- const done=$('status').value==='Concluída';
- $('completedDateWrap').classList.toggle('hidden',!done);
- $('jobDate').disabled=done;
+ let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;
  if(done&&!$('jobCompletedDate').value)$('jobCompletedDate').value=ds(new Date());
- if(!done)$('jobCompletedDate').value='';
- forecast();
+ if(!done)$('jobCompletedDate').value='';forecast();
 });
 
-$('jobForm').onsubmit=e=>{
- e.preventDefault();
- let j=formJob();
- let old=state.jobs.find(x=>x.id===j.id);
- if(old?.status==='Concluída'){
-   j.start=old.start;
-   j.machine=old.machine;
- }
- if(j.status==='Concluída'&&!j.completedDate)j.completedDate=ds(new Date());
- if(j.status!=='Concluída')j.completedDate=null;
- let chosen=pd(j.start);
- if(!workingDay(chosen)){
-   alert(chosen.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o no cabeçalho ou escolha outro dia.');
+function syncJobAlert(j){
+ let o=op(j.op),p=part(o?.part),acc=p?.accessories||[];
+ let existing=state.alerts.find(a=>a.jobId===j.id&&!a.archived);
+ if(j.status==='Concluída'||!acc.length){
+   if(existing){existing.closed=true;existing.updatedAt=new Date().toISOString()}
    return;
  }
- if(!turns(j))return forecast();
- let oldMachine=old?.machine;
- let i=state.jobs.findIndex(x=>x.id===j.id);
+ let items=acc.map(a=>({name:a.name,qtyPerPiece:+a.qty,total:+a.qty*j.qty}));
+ let signature=JSON.stringify({qty:j.qty,start:j.start,of:j.of,items});
+ if(!existing){
+   state.alerts.push({id:uid('al'),jobId:j.id,of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items,signature,read:false,closed:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+ }else{
+   let changed=existing.signature!==signature;
+   Object.assign(existing,{of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items,signature,closed:false,updatedAt:new Date().toISOString()});
+   if(changed)existing.read=false;
+ }
+}
+function syncAlertsForPart(pid){
+ let opIds=state.ops.filter(o=>o.part===pid).map(o=>o.id);
+ state.jobs.filter(j=>opIds.includes(j.op)).forEach(syncJobAlert);
+}
+
+$('jobForm').onsubmit=e=>{
+ e.preventDefault();$('jobError').textContent='';
+ let j=formJob(),old=state.jobs.find(x=>x.id===j.id);
+ if(!j.op)return $('jobError').textContent='Não existe operação compatível selecionada.';
+ if(!workingDay(pd(j.start)))return $('jobError').textContent=pd(j.start).getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo.';
+ if(!turns(j))return $('jobError').textContent='Escolha pelo menos um operador.';
+ let seq=sequenceCheck(j);if(!seq.ok)return $('jobError').textContent=seq.msg;
+
+ if(j.status==='Concluída'){
+   if(!j.completedDate)j.completedDate=ds(new Date());
+   if(!j.plannedEnd)j.plannedEnd=ds(jobLastWorkDate({...j,status:'Programada'}));
+ }else{
+   j.completedDate=null;j.plannedEnd=null;
+ }
+ let oldMachine=old?.machine,i=state.jobs.findIndex(x=>x.id===j.id);
  if(i>=0)state.jobs[i]=j;else state.jobs.push(j);
- if(oldMachine&&oldMachine!==j.machine)push(oldMachine);
- push(j.machine);
+ syncJobAlert(j);
+ if(oldMachine&&oldMachine!==j.machine)push(oldMachine);push(j.machine);
  save();$('jobDlg').close();render();
 };
+
 function push(mid){
  let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));
  for(let i=0;i<a.length;i++){
-   let cur=a[i];
-   let ns=normalizeStartDate(pd(cur.start));
-   if(ds(ns)!==cur.start)cur.start=ds(ns);
+   let cur=a[i],ns=normalizeStartDate(pd(cur.start));
+   if(ns>pd(cur.start))cur.start=ds(ns);
    if(i===0)continue;
-   let prev=a[i-1],prevEnd=end(prev),curStart=pd(cur.start);
-   if(prevEnd>curStart){
-     let next=new Date(prevEnd);
-     next.setHours(0,0,0,0);
-     if(prevEnd.getHours()||prevEnd.getMinutes()||prevEnd.getSeconds()||prevEnd.getMilliseconds())next=add(next,1);
-     next=normalizeStartDate(next);
-     cur.start=ds(next);
+   let prev=a[i-1],last=jobLastWorkDate(prev),curStart=pd(cur.start);
+   if(curStart<=last){
+     let next=nextWorkingDay(last);
+     if(next>curStart)cur.start=ds(next);
    }
  }
 }
-function repushAll(){state.machines.forEach(m=>push(m.id));save()}
-$('delJob').onclick=()=>{state.jobs=state.jobs.filter(j=>j.id!==editJob);save();$('jobDlg').close();render();};
-function partsTable(){$('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th></th></tr></thead><tbody>${state.parts.sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr><td><strong>${esc(p.code)}</strong></td><td>${esc(p.desc)}</td><td>${esc(cname(p.client))}</td><td>${state.ops.filter(o=>o.part===p.id).map(o=>`${esc(o.op)} · ${o.min} min`).join('<br>')}</td><td><button class="edit ep" data-id="${p.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id))}function groups(){return [...new Set(state.machines.map(m=>m.group))].sort()}function fillClients(){let s=$('pclient');s.innerHTML=state.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}function opRow(o={op:'OP10',min:10,setup:0,groups:[]}){let r=document.createElement('div');r.className='oprow';r.dataset.id=o.id||'';r.innerHTML=`<label>Operação<input class="oc" value="${esc(o.op)}"></label><div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Máquinas</div><div class="checks"></div></div><label>Min/pç<input class="om" type="number" min="0.1" step="0.1" value="${o.min}"></label><label>Setup h<input class="os" type="number" min="0" step="0.1" value="${o.setup}"></label><button type="button" class="danger ro">Remover</button>`;let c=r.querySelector('.checks');groups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${esc(g)}" ${o.groups.includes(g)?'checked':''}> ${esc(g)}</label>`);r.querySelector('.ro').onclick=()=>r.remove();$('ops').appendChild(r)}function partDlg(id=null){editPart=id;fillClients();$('ops').innerHTML='';$('perror').textContent='';if(id){let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;state.ops.filter(o=>o.part===id).forEach(opRow);$('delPart').classList.remove('hidden')}else{$('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';opRow();$('delPart').classList.add('hidden')}$('partDlg').showModal()}$('addPart').onclick=()=>partDlg();$('addOp').onclick=()=>opRow();$('partForm').onsubmit=e=>{e.preventDefault();let code=$('pcode').value.trim();if(!/^\d{8}$/.test(code))return $('perror').textContent='O código deve ter exatamente 8 dígitos.';if(state.parts.some(p=>p.code===code&&p.id!==editPart))return $('perror').textContent='Já existe uma peça com este código.';let rows=[...$('ops').querySelectorAll('.oprow')];if(!rows.length)return $('perror').textContent='Adicione pelo menos uma operação.';let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value},pi=state.parts.findIndex(x=>x.id===pid);if(pi>=0)state.parts[pi]=p;else state.parts.push(p);let keep=[];for(let r of rows){let gs=[...r.querySelectorAll('.checks input:checked')].map(x=>x.value);if(!gs.length)return $('perror').textContent='Cada operação precisa de pelo menos uma máquina.';let oid=r.dataset.id||uid('o');keep.push(oid);let n={id:oid,part:pid,op:r.querySelector('.oc').value.trim().toUpperCase(),min:+r.querySelector('.om').value,setup:+r.querySelector('.os').value,groups:gs},i=state.ops.findIndex(o=>o.id===oid);if(i>=0)state.ops[i]=n;else state.ops.push(n)}state.ops=state.ops.filter(o=>o.part!==pid||keep.includes(o.id));save();$('partDlg').close();render()};$('delPart').onclick=()=>{let ids=state.ops.filter(o=>o.part===editPart).map(o=>o.id);if(state.jobs.some(j=>ids.includes(j.op)))return $('perror').textContent='Esta peça está usada no planeamento.';state.ops=state.ops.filter(o=>o.part!==editPart);state.parts=state.parts.filter(p=>p.id!==editPart);save();$('partDlg').close();render()};
-function clientsTable(){$('clientsTable').innerHTML=`<table><thead><tr><th>Cliente</th><th></th></tr></thead><tbody>${state.clients.sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<tr><td>${esc(c.name)}</td><td><button class="edit ec" data-id="${c.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;document.querySelectorAll('.ec').forEach(b=>b.onclick=()=>clientDlg(b.dataset.id))}function clientDlg(id=null){editClient=id;let c=state.clients.find(x=>x.id===id);$('clientTitle').textContent=id?'Editar cliente':'Adicionar cliente';$('cname').value=c?.name||'';$('delClient').classList.toggle('hidden',!id);$('clientDlg').showModal()}$('addClient').onclick=()=>clientDlg();$('clientForm').onsubmit=e=>{e.preventDefault();let c={id:editClient||uid('c'),name:$('cname').value.trim()},i=state.clients.findIndex(x=>x.id===c.id);if(i>=0)state.clients[i]=c;else state.clients.push(c);save();$('clientDlg').close();render()};$('delClient').onclick=()=>{if(state.parts.some(p=>p.client===editClient))return alert('Este cliente está associado a peças.');state.clients=state.clients.filter(c=>c.id!==editClient);save();$('clientDlg').close();render()};
+function repushAll(){state.machines.forEach(m=>push(m.id))}
+$('delJob').onclick=()=>{
+ let j=state.jobs.find(x=>x.id===editJob);
+ if(j?.status==='Concluída')return alert('Uma produção concluída não deve ser eliminada. Reabra primeiro se precisar corrigir.');
+ state.jobs=state.jobs.filter(j=>j.id!==editJob);
+ state.alerts.forEach(a=>{if(a.jobId===editJob)a.archived=true});
+ save();$('jobDlg').close();render();
+};
+
+function compatibilityGroups(){return COMPAT_GROUPS}
+function fillClients(){let s=$('pclient');s.innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}
+function nextOpLabel(){return `OP${$('ops').querySelectorAll('.oprow').length+1}`}
+function opRow(o=null){
+ o=o||{op:nextOpLabel(),min:10,setup:0,groups:[]};
+ let r=document.createElement('div');r.className='oprow';r.dataset.id=o.id||'';
+ r.innerHTML=`<label>Operação<input class="oc" value="${esc(o.op)}"></label>
+ <div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Máquinas / grupos</div><div class="checks"></div></div>
+ <label>Min/pç<input class="om" type="number" min="0.1" step="0.1" value="${o.min}"></label>
+ <label>Setup h<input class="os" type="number" min="0" step="0.1" value="${o.setup}"></label>
+ <button type="button" class="danger ro">Remover</button>`;
+ let c=r.querySelector('.checks');
+ compatibilityGroups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${g}" ${o.groups.includes(g)?'checked':''}> ${g==='SERRALHARIA'?'Serralharia':g}</label>`);
+ r.querySelector('.ro').onclick=()=>r.remove();$('ops').appendChild(r);
+}
+function accessoryRow(a={id:'',name:'',qty:1}){
+ let r=document.createElement('div');r.className='accrow';r.dataset.id=a.id||'';
+ r.innerHTML=`<label>Acessório<input class="aname" value="${esc(a.name)}" placeholder="Ex.: Casquilho M16"></label>
+ <label>Qtd./peça<input class="aqty" type="number" min="0.01" step="0.01" value="${a.qty}"></label>
+ <button type="button" class="danger aremove">Remover</button>`;
+ r.querySelector('.aremove').onclick=()=>r.remove();$('accessories').appendChild(r);
+}
+function partsTable(){
+ $('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th>Acessórios</th><th></th></tr></thead>
+ <tbody>${state.parts.slice().sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr>
+ <td><strong>${esc(p.code)}</strong></td><td>${esc(p.desc)}</td><td>${esc(cname(p.client))}</td>
+ <td>${state.ops.filter(o=>o.part===p.id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).map(o=>`${esc(o.op)} · ${o.min} min · ${o.groups.map(g=>g==='SERRALHARIA'?'Serralharia':g).join(', ')}`).join('<br>')}</td>
+ <td>${(p.accessories||[]).map(a=>`${esc(a.name)} · ${a.qty}/pç`).join('<br>')||'—'}</td>
+ <td><button class="edit ep" data-id="${p.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
+ document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id));
+}
+function partDlg(id=null){
+ editPart=id;fillClients();$('ops').innerHTML='';$('accessories').innerHTML='';$('perror').textContent='';
+ if(id){
+   let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;
+   state.ops.filter(o=>o.part===id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).forEach(opRow);
+   (p.accessories||[]).forEach(accessoryRow);$('delPart').classList.remove('hidden');
+ }else{
+   $('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';opRow({op:'OP1',min:10,setup:0,groups:[]});$('delPart').classList.add('hidden');
+ }
+ $('partDlg').showModal();
+}
+$('addPart').onclick=()=>partDlg();
+$('addOp').onclick=()=>opRow({op:nextOpLabel(),min:10,setup:0,groups:[]});
+$('addAccessory').onclick=()=>accessoryRow();
+
+$('partForm').onsubmit=e=>{
+ e.preventDefault();$('perror').textContent='';
+ let code=$('pcode').value.trim();
+ if(!/^\d{8}$/.test(code))return $('perror').textContent='O código deve ter exatamente 8 dígitos.';
+ if(state.parts.some(p=>p.code===code&&p.id!==editPart))return $('perror').textContent='Já existe uma peça com este código.';
+ let rows=[...$('ops').querySelectorAll('.oprow')];if(!rows.length)return $('perror').textContent='Adicione pelo menos uma operação.';
+ let labels=rows.map(r=>r.querySelector('.oc').value.trim().toUpperCase());
+ if(new Set(labels).size!==labels.length)return $('perror').textContent='Não pode haver operações duplicadas.';
+ let accessories=[...$('accessories').querySelectorAll('.accrow')].map(r=>({id:r.dataset.id||uid('a'),name:r.querySelector('.aname').value.trim(),qty:+r.querySelector('.aqty').value})).filter(a=>a.name&&a.qty>0);
+ let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value,accessories};
+ let pi=state.parts.findIndex(x=>x.id===pid);if(pi>=0)state.parts[pi]=p;else state.parts.push(p);
+ let keep=[];
+ for(let r of rows){
+   let gs=[...r.querySelectorAll('.checks input:checked')].map(x=>x.value);if(!gs.length)return $('perror').textContent='Cada operação precisa de pelo menos uma máquina/grupo.';
+   let oid=r.dataset.id||uid('o');keep.push(oid);
+   let n={id:oid,part:pid,op:r.querySelector('.oc').value.trim().toUpperCase(),min:+r.querySelector('.om').value,setup:+r.querySelector('.os').value,groups:gs};
+   let i=state.ops.findIndex(o=>o.id===oid);if(i>=0)state.ops[i]=n;else state.ops.push(n);
+ }
+ let removed=state.ops.filter(o=>o.part===pid&&!keep.includes(o.id));
+ if(removed.some(o=>state.jobs.some(j=>j.op===o.id)))return $('perror').textContent='Não pode remover uma operação que já tem histórico de produção.';
+ state.ops=state.ops.filter(o=>o.part!==pid||keep.includes(o.id));
+ syncAlertsForPart(pid);save();$('partDlg').close();render();
+};
+$('delPart').onclick=()=>{
+ let ids=state.ops.filter(o=>o.part===editPart).map(o=>o.id);
+ if(state.jobs.some(j=>ids.includes(j.op)))return $('perror').textContent='Esta peça tem histórico e não pode ser eliminada.';
+ state.ops=state.ops.filter(o=>o.part!==editPart);state.parts=state.parts.filter(p=>p.id!==editPart);save();$('partDlg').close();render();
+};
+
+function clientsTable(){
+ $('clientsTable').innerHTML=`<table><thead><tr><th>Cliente</th><th></th></tr></thead><tbody>${state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<tr><td>${esc(c.name)}</td><td><button class="edit ec" data-id="${c.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
+ document.querySelectorAll('.ec').forEach(b=>b.onclick=()=>clientDlg(b.dataset.id));
+}
+function clientDlg(id=null){editClient=id;let c=state.clients.find(x=>x.id===id);$('clientTitle').textContent=id?'Editar cliente':'Adicionar cliente';$('cname').value=c?.name||'';$('delClient').classList.toggle('hidden',!id);$('clientDlg').showModal()}
+$('addClient').onclick=()=>clientDlg();
+$('clientForm').onsubmit=e=>{e.preventDefault();let c={id:editClient||uid('c'),name:$('cname').value.trim()},i=state.clients.findIndex(x=>x.id===c.id);if(i>=0)state.clients[i]=c;else state.clients.push(c);save();$('clientDlg').close();render()};
+$('delClient').onclick=()=>{if(state.parts.some(p=>p.client===editClient))return alert('Este cliente está associado a peças.');state.clients=state.clients.filter(c=>c.id!==editClient);save();$('clientDlg').close();render()};
+
+function machinesTable(){
+ $('machinesTable').innerHTML=`<table><thead><tr><th>Ordem</th><th>Recurso</th><th>Tipo</th><th>Grupo</th><th>Estado</th><th></th></tr></thead><tbody>
+ ${state.machines.slice().sort((a,b)=>machineOrder(a)-machineOrder(b)).map((m,i)=>`<tr class="${m.active===false?'machine-inactive':''}">
+ <td class="machine-order">${i+1}</td><td><strong>${esc(m.code)}</strong></td><td>${esc(m.type||'CNC')}</td><td>${esc(m.group)}</td>
+ <td>${m.active===false?'Inativo':'Ativo'}</td><td><button class="edit emach" data-id="${m.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
+ document.querySelectorAll('.emach').forEach(b=>b.onclick=()=>machineDlg(b.dataset.id));
+}
+function machineDlg(id=null){
+ editMachine=id;let m=mach(id);$('machineError').textContent='';$('machineTitle').textContent=id?'Editar máquina / recurso':'Adicionar máquina / recurso';
+ $('machineCode').value=m?.code||'';$('machineType').value=m?.type||'CNC';$('machineGroup').value=m?.group||'OUTRO';$('machineActive').checked=m?.active!==false;
+ $('delMachine').classList.toggle('hidden',!id);$('machineCode').disabled=!!(id&&state.jobs.some(j=>j.machine===id));$('machineDlg').showModal();
+}
+$('addMachine').onclick=()=>machineDlg();
+$('machineForm').onsubmit=e=>{
+ e.preventDefault();$('machineError').textContent='';
+ let old=mach(editMachine),code=$('machineCode').value.trim();
+ if(state.machines.some(m=>m.code.toLowerCase()===code.toLowerCase()&&m.id!==editMachine))return $('machineError').textContent='Já existe um recurso com este nome.';
+ let m={id:editMachine||uid('m'),code:old?.code||code,type:$('machineType').value,group:$('machineGroup').value,active:$('machineActive').checked,order:old?.order??100};
+ if(!editMachine)m.code=code;
+ let i=state.machines.findIndex(x=>x.id===m.id);if(i>=0)state.machines[i]=m;else state.machines.push(m);
+ normalizeState();save();$('machineDlg').close();render();
+};
+$('delMachine').onclick=()=>{
+ if(state.jobs.some(j=>j.machine===editMachine))return $('machineError').textContent='Este recurso tem histórico. Marque-o como inativo em vez de eliminar.';
+ state.machines=state.machines.filter(m=>m.id!==editMachine);save();$('machineDlg').close();render();
+};
+
 function peopleTable(){
- $('peopleTable').innerHTML=`<table><thead><tr><th>Colaborador</th><th>Turno</th><th>Horário</th><th>Intervalos</th><th>Horas líquidas</th><th></th></tr></thead><tbody>${state.employees.sort((a,b)=>a.name.localeCompare(b.name)).map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.shift)}</td><td>${esc(e.start)}–${esc(e.end)}</td><td>${(e.breaks||[]).map(b=>`${esc(b.start)}–${esc(b.end)}`).join('<br>')||'—'}</td><td><strong>${fmtHours(netHours(e))}</strong></td><td><button class="edit ee" data-id="${e.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
+ $('peopleTable').innerHTML=`<table><thead><tr><th>Colaborador</th><th>Turno</th><th>Horário</th><th>Intervalos</th><th>Horas líquidas</th><th></th></tr></thead><tbody>${state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.shift)}</td><td>${esc(e.start)}–${esc(e.end)}</td><td>${(e.breaks||[]).map(b=>`${esc(b.start)}–${esc(b.end)}`).join('<br>')||'—'}</td><td><strong>${fmtHours(netHours(e))}</strong></td><td><button class="edit ee" data-id="${e.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
  document.querySelectorAll('.ee').forEach(b=>b.onclick=()=>empDlg(b.dataset.id));
 }
 function addBreakRow(br={start:'',end:''}){
  let r=document.createElement('div');r.className='breakrow';
  r.innerHTML=`<label>Início<input class="bstart" type="time" value="${esc(br.start)}" required></label><label>Fim<input class="bend" type="time" value="${esc(br.end)}" required></label><button type="button" class="danger bremove">Remover</button>`;
- r.querySelector('.bremove').onclick=()=>{r.remove();updateEmployeeNet()};
- r.querySelectorAll('input').forEach(i=>i.addEventListener('input',updateEmployeeNet));
- $('breaks').appendChild(r);
+ r.querySelector('.bremove').onclick=()=>{r.remove();updateEmployeeNet()};r.querySelectorAll('input').forEach(i=>i.addEventListener('input',updateEmployeeNet));$('breaks').appendChild(r);
 }
-function employeeFormData(){
- return{
-   id:editEmp||uid('e'),
-   name:$('ename').value.trim(),
-   shift:$('eshift').value,
-   start:$('estart').value,
-   end:$('eend').value,
-   breaks:[...$('breaks').querySelectorAll('.breakrow')].map(r=>({start:r.querySelector('.bstart').value,end:r.querySelector('.bend').value}))
- };
-}
-function updateEmployeeNet(){
- let e=employeeFormData(),h=netHours(e);
- $('enet').textContent=fmtHours(h);
- $('eerror').textContent=h>0?'':'O horário líquido tem de ser superior a zero.';
-}
+function employeeFormData(){return{id:editEmp||uid('e'),name:$('ename').value.trim(),shift:$('eshift').value,start:$('estart').value,end:$('eend').value,breaks:[...$('breaks').querySelectorAll('.breakrow')].map(r=>({start:r.querySelector('.bstart').value,end:r.querySelector('.bend').value}))}}
+function updateEmployeeNet(){let e=employeeFormData(),h=netHours(e);$('enet').textContent=fmtHours(h);$('eerror').textContent=h>0?'':'O horário líquido tem de ser superior a zero.'}
 function empDlg(id=null){
- editEmp=id;let e=state.employees.find(x=>x.id===id);
- let def=shiftDefaults[e?.shift||'Manhã'];
- $('empTitle').textContent=id?'Editar colaborador':'Adicionar colaborador';
- $('ename').value=e?.name||'';
- $('eshift').value=e?.shift||'Manhã';
- $('estart').value=e?.start||def.start;
- $('eend').value=e?.end||def.end;
- $('breaks').innerHTML='';
- (e?.breaks||structuredClone(def.breaks)).forEach(addBreakRow);
- $('delEmp').classList.toggle('hidden',!id);
- $('eerror').textContent='';
- updateEmployeeNet();
- $('empDlg').showModal();
+ editEmp=id;let e=state.employees.find(x=>x.id===id),def=shiftDefaults[e?.shift||'Manhã'];$('empTitle').textContent=id?'Editar colaborador':'Adicionar colaborador';
+ $('ename').value=e?.name||'';$('eshift').value=e?.shift||'Manhã';$('estart').value=e?.start||def.start;$('eend').value=e?.end||def.end;$('breaks').innerHTML='';
+ (e?.breaks||structuredClone(def.breaks)).forEach(addBreakRow);$('delEmp').classList.toggle('hidden',!id);$('eerror').textContent='';updateEmployeeNet();$('empDlg').showModal();
 }
-$('addEmp').onclick=()=>empDlg();
-$('addBreak').onclick=()=>{addBreakRow();updateEmployeeNet()};
-$('eshift').addEventListener('change',()=>{
- if(!editEmp){
-   let d=shiftDefaults[$('eshift').value];
-   $('estart').value=d.start;$('eend').value=d.end;$('breaks').innerHTML='';structuredClone(d.breaks).forEach(addBreakRow);updateEmployeeNet();
- }
-});
+$('addEmp').onclick=()=>empDlg();$('addBreak').onclick=()=>{addBreakRow();updateEmployeeNet()};
+$('eshift').addEventListener('change',()=>{if(!editEmp){let d=shiftDefaults[$('eshift').value];$('estart').value=d.start;$('eend').value=d.end;$('breaks').innerHTML='';structuredClone(d.breaks).forEach(addBreakRow);updateEmployeeNet()}});
 ['estart','eend'].forEach(id=>$(id).addEventListener('input',updateEmployeeNet));
-$('empForm').onsubmit=e=>{
- e.preventDefault();let x=employeeFormData();
- if(netHours(x)<=0){$('eerror').textContent='O horário líquido tem de ser superior a zero.';return}
- let i=state.employees.findIndex(y=>y.id===x.id);
- if(i>=0)state.employees[i]=x;else state.employees.push(x);
- repushAll();save();$('empDlg').close();render();
-};
-$('delEmp').onclick=()=>{
- if(state.jobs.some(j=>[j.m,j.a,j.n].includes(editEmp)))return alert('Este colaborador está usado no planeamento.');
- state.employees=state.employees.filter(e=>e.id!==editEmp);save();$('empDlg').close();render();
-};
-$('prev').onclick=()=>{state.start=add(state.start,-state.weeksVisible*7);gantt()};$('next').onclick=()=>{state.start=add(state.start,state.weeksVisible*7);gantt()};$('today').onclick=()=>{state.start=startWeek(new Date());
-state.weeksVisible=4;gantt()};tabs();
+$('empForm').onsubmit=e=>{e.preventDefault();let x=employeeFormData();if(netHours(x)<=0)return $('eerror').textContent='O horário líquido tem de ser superior a zero.';let i=state.employees.findIndex(y=>y.id===x.id);if(i>=0)state.employees[i]=x;else state.employees.push(x);repushAll();save();$('empDlg').close();render()};
+$('delEmp').onclick=()=>{if(state.jobs.some(j=>[j.m,j.a,j.n].includes(editEmp)))return alert('Este colaborador tem histórico de produção e não pode ser eliminado.');state.employees=state.employees.filter(e=>e.id!==editEmp);save();$('empDlg').close();render()};
+
 function jobInfo(j){
- const o=op(j.op),p=part(o?.part),m=mach(j.machine);
- return{
-   of:j.of||'—',
-   part:p?.code||'—',
-   op:o?.op||'—',
-   machine:m?.code||'—',
-   qty:j.qty,
-   start:j.start,
-   finish:j.status==='Concluída'?(j.completedDate||ds(end(j))):ds(end(j)),
-   status:j.status
- };
+ let o=op(j.op),p=part(o?.part),m=mach(j.machine);
+ return {of:j.of||'—',part:p?.code||'—',desc:p?.desc||'—',op:o?.op||'—',machine:m?.code||'—',qty:j.qty,start:j.start,planned:j.plannedEnd||ds(jobLastWorkDate(j)),actual:j.completedDate||'',status:j.status};
+}
+function completeFromSearch(id){
+ let j=state.jobs.find(x=>x.id===id);if(!j||j.status==='Concluída')return;
+ if(!confirm(`Marcar a OF ${j.of||'—'} como concluída?`)){renderSearch();return}
+ j.plannedEnd=j.plannedEnd||ds(jobLastWorkDate(j));j.status='Concluída';j.completedDate=ds(new Date());syncJobAlert(j);save();render();renderSearch();
 }
 function renderSearch(){
- const qOF=$('searchOF').value.trim().toLowerCase();
- const qPart=$('searchPart').value.trim();
- let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>{
-   const okOF=!qOF||String(x.info.of).toLowerCase().includes(qOF);
-   const okPart=!qPart||String(x.info.part).includes(qPart);
-   return okOF&&okPart;
- }).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
-
+ let qOF=$('searchOF').value.trim().toLowerCase(),qPart=$('searchPart').value.trim();
+ let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>(!qOF||String(x.info.of).toLowerCase().includes(qOF))&&(!qPart||String(x.info.part).includes(qPart))).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
  $('searchSummary').textContent=rows.length?`${rows.length} registo(s) encontrado(s)`:'Nenhum registo encontrado';
- $('searchResults').innerHTML=rows.length?`<table class="search-table">
-   <thead><tr><th>OF</th><th>Peça</th><th>OP</th><th>Máquina</th><th>Qtd.</th><th>Início</th><th>${rows.some(x=>x.info.status==='Concluída')?'Fim / conclusão':'Fim previsto'}</th><th>Estado</th></tr></thead>
-   <tbody>${rows.map(x=>`<tr>
-     <td><strong>${esc(x.info.of)}</strong></td>
-     <td>${esc(x.info.part)}</td>
-     <td>${esc(x.info.op)}</td>
-     <td>${esc(x.info.machine)}</td>
-     <td>${x.info.qty}</td>
-     <td>${pd(x.info.start).toLocaleDateString('pt-PT')}</td>
-     <td>${pd(x.info.finish).toLocaleDateString('pt-PT')}</td>
-     <td><span class="status-pill ${x.info.status==='Concluída'?'status-done':'status-planned'}">${esc(x.info.status)}</span></td>
-   </tr>`).join('')}</tbody>
- </table>`:'';
+ $('searchResults').innerHTML=rows.length?`<table class="search-table"><thead><tr><th>OF</th><th>Peça</th><th>Nome</th><th>OP</th><th>Máquina</th><th>Qtd.</th><th>Início</th><th>Fim previsto</th><th>Fim real</th><th>Estado</th><th>Fim produção</th></tr></thead>
+ <tbody>${rows.map(x=>`<tr><td><strong>${esc(x.info.of)}</strong></td><td>${esc(x.info.part)}</td><td>${esc(x.info.desc)}</td><td>${esc(x.info.op)}</td><td>${esc(x.info.machine)}</td><td>${x.info.qty}</td>
+ <td>${pd(x.info.start).toLocaleDateString('pt-PT')}</td><td>${pd(x.info.planned).toLocaleDateString('pt-PT')}</td><td>${x.info.actual?pd(x.info.actual).toLocaleDateString('pt-PT'):'—'}</td>
+ <td><span class="status-pill ${x.info.status==='Concluída'?'status-done':'status-planned'}">${esc(x.info.status)}</span></td>
+ <td class="finish-check"><input class="finish-production" data-id="${x.j.id}" type="checkbox" ${x.info.status==='Concluída'?'checked disabled':''} title="${x.info.status==='Concluída'?'Para reabrir, edite a produção.':'Marcar como concluída'}"></td></tr>`).join('')}</tbody></table>`:'';
+ document.querySelectorAll('.finish-production:not(:disabled)').forEach(c=>c.onchange=()=>{if(c.checked)completeFromSearch(c.dataset.id)});
 }
-$('openSearch').onclick=()=>{
- $('searchOF').value='';
- $('searchPart').value='';
- renderSearch();
- $('searchDlg').showModal();
-};
-$('searchOF').addEventListener('input',renderSearch);
-$('searchPart').addEventListener('input',renderSearch);
-$('clearSearch').onclick=()=>{
- $('searchOF').value='';
- $('searchPart').value='';
- renderSearch();
-};
+$('openSearch').onclick=()=>{$('searchOF').value='';$('searchPart').value='';renderSearch();$('searchDlg').showModal()};
+$('searchOF').addEventListener('input',renderSearch);$('searchPart').addEventListener('input',renderSearch);
+$('clearSearch').onclick=()=>{$('searchOF').value='';$('searchPart').value='';renderSearch()};
 
+function pendingAlerts(){return state.alerts.filter(a=>!a.read&&!a.closed&&!a.archived)}
+function renderAlertBadge(){
+ let n=pendingAlerts().length;$('alertBadge').textContent=n;$('alertBadge').classList.toggle('hidden',!n);
+}
+function renderAlerts(){
+ let arr=pendingAlerts().sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+ $('alertsList').innerHTML=arr.length?arr.map(a=>`<div class="alert-card"><h4>OF ${esc(a.of||'—')} — ${esc(a.partCode)} — ${esc(a.partDesc)}</h4>
+ <div>Produção: <strong>${a.qty} peças</strong> · início ${pd(a.start).toLocaleDateString('pt-PT')}</div>
+ <ul>${a.items.map(i=>`<li>${esc(i.name)}: <strong>${i.total}</strong> un. (${i.qtyPerPiece}/peça)</li>`).join('')}</ul>
+ <label class="alert-read"><input type="checkbox" class="mark-alert-read" data-id="${a.id}"> Lido</label></div>`).join(''):'<div class="no-alerts">Não existem alertas pendentes.</div>';
+ document.querySelectorAll('.mark-alert-read').forEach(c=>c.onchange=()=>{let a=state.alerts.find(x=>x.id===c.dataset.id);if(a&&c.checked){a.read=true;a.readAt=new Date().toISOString();save();renderAlerts();renderAlertBadge()}});
+}
+$('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
+
+function downloadBackup(){
+ let payload={backup_type:'planeamento-maquinacao',version:'2.0',created_at:new Date().toISOString(),data:snapshotState()};
+ let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
+ let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
+ a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
+}
+$('backupBtn').onclick=downloadBackup;
+
+$('prev').onclick=()=>{state.start=add(state.start,-state.weeksVisible*7);gantt()};
+$('next').onclick=()=>{state.start=add(state.start,state.weeksVisible*7);gantt()};
+$('today').onclick=()=>{state.start=startWeek(new Date());gantt()};
+$('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
+
+tabs();
 bootstrapRemote();
-
-$('weeksVisible')?.addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});

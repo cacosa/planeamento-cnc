@@ -264,3 +264,49 @@
 #mode.online{
   background:#e7f6ec;
 }
+
+
+/* =========================================================
+   V2.0
+   ========================================================= */
+.app-header{display:flex;align-items:center;justify-content:space-between;gap:24px}
+.header-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.factory-logo{width:190px;max-height:58px;object-fit:contain}
+.icon-btn{position:relative;min-width:44px;height:40px;padding:6px 10px;font-size:19px}
+.alert-badge{position:absolute;right:-5px;top:-7px;min-width:20px;height:20px;border-radius:999px;background:#d92d20;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff}
+footer{margin:18px 24px 24px;color:#687182;font-size:12px;text-align:right}
+nav{display:flex;gap:8px;flex-wrap:wrap}
+nav #backupBtn{margin-left:auto}
+.machine-inactive{opacity:.55}
+.machine-order{font-weight:800;color:#687182}
+.checkline{display:flex!important;align-items:center;gap:8px;padding-top:24px}
+.checkline input{width:auto}
+.accessory-title{margin-top:18px}
+.accrow{display:grid;grid-template-columns:minmax(220px,2fr) minmax(130px,1fr) auto;gap:10px;align-items:end;margin:8px 0}
+.oprow .oc{font-weight:800}
+.bar .bar-name{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.bar.segment{overflow:hidden}
+.bar.segment.blank strong,.bar.segment.blank .bar-name{display:none}
+.bar.done{filter:saturate(.4)}
+.alerts-dialog{width:min(760px,94vw)}
+.alert-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:10px 0;background:#fff}
+.alert-card h4{margin:0 0 6px}
+.alert-card ul{margin:7px 0 10px;padding-left:20px}
+.alert-read{display:flex;align-items:center;gap:7px;font-weight:700}
+.alert-read input{width:auto}
+.no-alerts{padding:20px;text-align:center;color:var(--muted)}
+.search-table .finish-check{text-align:center}
+.search-table .finish-check input{width:18px;height:18px}
+.tooltip-note{font-size:11px;color:var(--muted)}
+.weekend.nonworking,.cell.nonworking{background:#eef0f3}
+.hdr .sunday-locked{background:#e6e8ec}
+.hdr .saturday-toggle:not(.sat-active){background:#eceef1}
+.hdr .saturday-toggle.sat-active{background:#dff1e3}
+.gantt-row-separator{border-top:2px solid #ccd2da}
+#mode.online{white-space:nowrap}
+@media(max-width:900px){
+  .factory-logo{width:145px}
+  .app-header{align-items:flex-start}
+  .accrow{grid-template-columns:1fr}
+  nav #backupBtn{margin-left:0}
+}

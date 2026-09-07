@@ -1,35 +1,231 @@
-<!doctype html><html lang="pt-PT"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Planeamento CNC</title><link rel="stylesheet" href="style.css"></head><body>
-<header><div><h1>Planeamento CNC</h1><p>Planeamento visual de máquinas, peças e operadores</p></div><span id="mode">A ligar ao Supabase…</span></header>
-<main><nav><button class="tab active" data-v="plan">Planeamento</button><button class="tab" data-v="parts">Peças / Tempos</button><button class="tab" data-v="clients">Clientes</button><button class="tab" data-v="people">Colaboradores</button><button id="openSearch" type="button">Pesquisa</button></nav>
-<section id="plan" class="view active"><div class="row"><div><h2 id="period"></h2><p>Clique numa célula para iniciar produção; clique numa barra para editar. Pode arrastar uma programação para outro dia ou editar diretamente a data de início. O cálculo usa os horários líquidos dos colaboradores. Clique no cabeçalho de sábado para ativar/desativar esse sábado.</p></div><div><label class="weeks-select">Mostrar <select id="weeksVisible"><option value="2">2 semanas</option><option value="4" selected>4 semanas</option><option value="6">6 semanas</option></select></label><button id="prev">← período</button><button id="today">Hoje</button><button id="next">período →</button></div></div><div class="legend"><span><i class="g1"></i>Programada</span><span><i class="g2"></i>Seguinte</span><span><i class="late"></i>Atrasada</span><span><i class="we"></i>Fim de semana</span></div><div class="scroll"><div id="gantt"></div></div></section>
-<section id="parts" class="view"><div class="row"><div><h2>Peças / Tempos</h2><p>Código único de 8 dígitos, descrição, cliente e operações.</p></div><button id="addPart" class="primary">+ Adicionar peça</button></div><div class="card" id="partsTable"></div></section>
-<section id="clients" class="view"><div class="row"><h2>Clientes</h2><button id="addClient" class="primary">+ Adicionar cliente</button></div><div class="card" id="clientsTable"></div></section>
-<section id="people" class="view"><div class="row"><div><h2>Colaboradores</h2><p>O turno determina onde o colaborador aparece.</p></div><button id="addEmp" class="primary">+ Adicionar colaborador</button></div><div class="card" id="peopleTable"></div></section></main>
-<dialog id="jobDlg"><form id="jobForm"><div class="row"><div><h3 id="jobTitle"></h3><p id="jobMeta"></p></div><button type="button" class="close" data-d="jobDlg">✕</button></div><div class="grid"><label>Peça / operação<select id="jobOp"></select></label><label>OF<input id="jobOF" placeholder="Ex.: 4587"></label><label>Quantidade<input id="jobQty" type="number" min="1" value="20"></label><label>Data de início<input id="jobDate" type="date" required></label><label>Operador — manhã<select id="morn"></select></label><label>Operador — tarde<select id="aft"></select></label><label>Operador — noite<select id="night"></select></label><label>Estado<select id="status"><option>Programada</option><option>Concluída</option></select></label><label id="completedDateWrap" class="hidden">Data de conclusão<input id="jobCompletedDate" type="date"></label><div class="forecast full"><small>Previsão</small><strong id="forecast"></strong></div></div><div class="actions"><button type="button" id="delJob" class="danger hidden">Eliminar</button><span></span><button type="button" class="close" data-d="jobDlg">Cancelar</button><button class="primary">Guardar</button></div></form></dialog>
-<dialog id="partDlg"><form id="partForm"><div class="row"><h3 id="partTitle"></h3><button type="button" class="close" data-d="partDlg">✕</button></div><div class="grid"><label>Código da peça<input id="pcode" maxlength="8" inputmode="numeric" required><small>Exatamente 8 dígitos e único.</small></label><label>Cliente<select id="pclient"></select></label><label class="full">Descrição<input id="pdesc" required></label></div><div class="row"><h4>Operações</h4><button type="button" id="addOp">+ Operação</button></div><div id="ops"></div><p id="perror" class="error"></p><div class="actions"><button type="button" id="delPart" class="danger hidden">Eliminar peça</button><span></span><button type="button" class="close" data-d="partDlg">Cancelar</button><button class="primary">Guardar peça</button></div></form></dialog>
-<dialog id="clientDlg"><form id="clientForm"><div class="row"><h3 id="clientTitle"></h3><button type="button" class="close" data-d="clientDlg">✕</button></div><label>Cliente<input id="cname" required></label><div class="actions"><button type="button" id="delClient" class="danger hidden">Eliminar</button><span></span><button type="button" class="close" data-d="clientDlg">Cancelar</button><button class="primary">Guardar</button></div></form></dialog>
-<dialog id="empDlg"><form id="empForm"><div class="row"><div><h3 id="empTitle"></h3><p>Horário normal e intervalos do colaborador.</p></div><button type="button" class="close" data-d="empDlg">✕</button></div><div class="grid"><label>Nome<input id="ename" required></label><label>Turno<select id="eshift"><option>Manhã</option><option>Tarde</option><option>Noite</option></select></label><label>Entrada<input id="estart" type="time" required></label><label>Saída<input id="eend" type="time" required></label></div><div class="row"><h4>Intervalos</h4><button type="button" id="addBreak">+ Intervalo</button></div><div id="breaks"></div><div class="forecast"><small>Horas líquidas por dia</small><strong id="enet">—</strong></div><p id="eerror" class="error"></p><div class="actions"><button type="button" id="delEmp" class="danger hidden">Eliminar</button><span></span><button type="button" class="close" data-d="empDlg">Cancelar</button><button class="primary">Guardar</button></div></form></dialog>
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PLANEAMENTO - MAQUINAÇÃO</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="app-header">
+  <div>
+    <h1>PLANEAMENTO - MAQUINAÇÃO</h1>
+    <p>Planeamento visual de máquinas, peças, OFs e operadores</p>
+  </div>
+  <div class="header-right">
+    <img src="fabcast-logo.png" alt="FABCAST" class="factory-logo">
+    <button id="alertsBtn" class="icon-btn" type="button" title="Alertas">
+      <span class="bell">🔔</span><span id="alertBadge" class="alert-badge hidden">0</span>
+    </button>
+    <span id="mode">A ligar ao Supabase…</span>
+  </div>
+</header>
+
+<main>
+  <nav>
+    <button class="tab active" data-v="plan">Planeamento</button>
+    <button class="tab" data-v="parts">Peças / Tempos</button>
+    <button class="tab" data-v="clients">Clientes</button>
+    <button class="tab" data-v="machines">Máquinas / Recursos</button>
+    <button class="tab" data-v="people">Colaboradores</button>
+    <button id="openSearch" type="button">Pesquisa</button>
+    <button id="backupBtn" type="button">Backup</button>
+  </nav>
+
+  <section id="plan" class="view active">
+    <div class="row">
+      <div>
+        <h2 id="period"></h2>
+        <p>Clique numa célula para iniciar produção; clique numa barra para editar. Pode arrastar uma programação para outro dia. Domingo não trabalha e o sábado só conta quando estiver ativado.</p>
+      </div>
+      <div>
+        <label class="weeks-select">Mostrar
+          <select id="weeksVisible">
+            <option value="2">2 semanas</option>
+            <option value="4" selected>4 semanas</option>
+            <option value="6">6 semanas</option>
+          </select>
+        </label>
+        <button id="prev">← período</button>
+        <button id="today">Hoje</button>
+        <button id="next">período →</button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="g1"></i>Programada</span>
+      <span><i class="g2"></i>Seguinte</span>
+      <span><i class="late"></i>Atrasada</span>
+      <span><i class="we"></i>Fim de semana</span>
+    </div>
+    <div class="scroll"><div id="gantt"></div></div>
+  </section>
+
+  <section id="parts" class="view">
+    <div class="row">
+      <div><h2>Peças / Tempos</h2><p>Código, designação, cliente, operações, compatibilidades e acessórios.</p></div>
+      <button id="addPart" class="primary">+ Adicionar peça</button>
+    </div>
+    <div class="card" id="partsTable"></div>
+  </section>
+
+  <section id="clients" class="view">
+    <div class="row"><h2>Clientes</h2><button id="addClient" class="primary">+ Adicionar cliente</button></div>
+    <div class="card" id="clientsTable"></div>
+  </section>
+
+  <section id="machines" class="view">
+    <div class="row">
+      <div><h2>Máquinas / Recursos</h2><p>Ordem e compatibilidade usadas no planeamento.</p></div>
+      <button id="addMachine" class="primary">+ Adicionar recurso</button>
+    </div>
+    <div class="card" id="machinesTable"></div>
+  </section>
+
+  <section id="people" class="view">
+    <div class="row">
+      <div><h2>Colaboradores</h2><p>Horários, turnos e intervalos.</p></div>
+      <button id="addEmp" class="primary">+ Adicionar colaborador</button>
+    </div>
+    <div class="card" id="peopleTable"></div>
+  </section>
+</main>
+
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.0</footer>
+
+<dialog id="jobDlg">
+<form id="jobForm">
+  <div class="row">
+    <div><h3 id="jobTitle"></h3><p id="jobMeta"></p></div>
+    <button type="button" class="close" data-d="jobDlg">✕</button>
+  </div>
+  <div class="grid">
+    <label class="full">Peça / operação<select id="jobOp"></select></label>
+    <label>OF<input id="jobOF" placeholder="Ex.: 4587"></label>
+    <label>Quantidade<input id="jobQty" type="number" min="1" value="20"></label>
+    <label>Data de início<input id="jobDate" type="date" required></label>
+    <label>Operador — manhã<select id="morn"></select></label>
+    <label>Operador — tarde<select id="aft"></select></label>
+    <label>Operador — noite<select id="night"></select></label>
+    <label>Estado<select id="status"><option>Programada</option><option>Concluída</option></select></label>
+    <label id="completedDateWrap" class="hidden">Data de conclusão<input id="jobCompletedDate" type="date"></label>
+    <div class="forecast full"><small>Previsão</small><strong id="forecast"></strong></div>
+  </div>
+  <p id="jobError" class="error"></p>
+  <div class="actions">
+    <button type="button" id="delJob" class="danger hidden">Eliminar</button><span></span>
+    <button type="button" class="close" data-d="jobDlg">Cancelar</button>
+    <button class="primary">Guardar</button>
+  </div>
+</form>
+</dialog>
+
+<dialog id="partDlg">
+<form id="partForm">
+  <div class="row"><h3 id="partTitle"></h3><button type="button" class="close" data-d="partDlg">✕</button></div>
+  <div class="grid">
+    <label>Código da peça<input id="pcode" maxlength="8" inputmode="numeric" required><small>Exatamente 8 dígitos e único.</small></label>
+    <label>Cliente<select id="pclient"></select></label>
+    <label class="full">Nome / designação da peça<input id="pdesc" required></label>
+  </div>
+
+  <div class="row"><h4>Operações</h4><button type="button" id="addOp">+ Operação</button></div>
+  <div id="ops"></div>
+
+  <div class="row accessory-title"><h4>Acessórios</h4><button type="button" id="addAccessory">+ Acessório</button></div>
+  <div id="accessories"></div>
+  <small>Ex.: Casquilho M16 — 4 unidades por peça. A quantidade necessária será calculada automaticamente ao programar uma OF.</small>
+
+  <p id="perror" class="error"></p>
+  <div class="actions">
+    <button type="button" id="delPart" class="danger hidden">Eliminar peça</button><span></span>
+    <button type="button" class="close" data-d="partDlg">Cancelar</button>
+    <button class="primary">Guardar peça</button>
+  </div>
+</form>
+</dialog>
+
+<dialog id="clientDlg">
+<form id="clientForm">
+  <div class="row"><h3 id="clientTitle"></h3><button type="button" class="close" data-d="clientDlg">✕</button></div>
+  <label>Cliente<input id="cname" required></label>
+  <div class="actions">
+    <button type="button" id="delClient" class="danger hidden">Eliminar</button><span></span>
+    <button type="button" class="close" data-d="clientDlg">Cancelar</button>
+    <button class="primary">Guardar</button>
+  </div>
+</form>
+</dialog>
+
+<dialog id="machineDlg">
+<form id="machineForm">
+  <div class="row"><h3 id="machineTitle"></h3><button type="button" class="close" data-d="machineDlg">✕</button></div>
+  <div class="grid">
+    <label>Código / Nome<input id="machineCode" required></label>
+    <label>Tipo<select id="machineType"><option>CNC</option><option>Serralharia</option><option>Outro</option></select></label>
+    <label>Grupo de compatibilidade
+      <select id="machineGroup">
+        <option>EC1600</option><option>VF3</option><option>UMC750</option><option>UMC1000</option>
+        <option>SL30</option><option>V8300</option><option>SERRALHARIA</option><option>OUTRO</option>
+      </select>
+    </label>
+    <label class="checkline"><input id="machineActive" type="checkbox" checked> Recurso ativo</label>
+  </div>
+  <p id="machineError" class="error"></p>
+  <div class="actions">
+    <button type="button" id="delMachine" class="danger hidden">Eliminar</button><span></span>
+    <button type="button" class="close" data-d="machineDlg">Cancelar</button>
+    <button class="primary">Guardar</button>
+  </div>
+</form>
+</dialog>
+
+<dialog id="empDlg">
+<form id="empForm">
+  <div class="row">
+    <div><h3 id="empTitle"></h3><p>Horário normal e intervalos do colaborador.</p></div>
+    <button type="button" class="close" data-d="empDlg">✕</button>
+  </div>
+  <div class="grid">
+    <label>Nome<input id="ename" required></label>
+    <label>Turno<select id="eshift"><option>Manhã</option><option>Tarde</option><option>Noite</option></select></label>
+    <label>Entrada<input id="estart" type="time" required></label>
+    <label>Saída<input id="eend" type="time" required></label>
+  </div>
+  <div class="row"><h4>Intervalos</h4><button type="button" id="addBreak">+ Intervalo</button></div>
+  <div id="breaks"></div>
+  <div class="forecast"><small>Horas líquidas por dia</small><strong id="enet">—</strong></div>
+  <p id="eerror" class="error"></p>
+  <div class="actions">
+    <button type="button" id="delEmp" class="danger hidden">Eliminar</button><span></span>
+    <button type="button" class="close" data-d="empDlg">Cancelar</button>
+    <button class="primary">Guardar</button>
+  </div>
+</form>
+</dialog>
 
 <dialog id="searchDlg" class="search-dialog">
   <div class="row">
-    <div>
-      <h3>Pesquisa de produção</h3>
-      <p>Pesquise por OF ou código da peça.</p>
-    </div>
+    <div><h3>Pesquisa de produção</h3><p>Pesquise por OF ou código da peça e conclua uma produção diretamente.</p></div>
     <button type="button" class="close" data-d="searchDlg">✕</button>
   </div>
   <div class="search-controls">
-    <label>OF
-      <input id="searchOF" placeholder="Ex.: 4587">
-    </label>
-    <label>Código da peça
-      <input id="searchPart" inputmode="numeric" placeholder="8 dígitos">
-    </label>
+    <label>OF<input id="searchOF" placeholder="Ex.: 4587"></label>
+    <label>Código da peça<input id="searchPart" inputmode="numeric" placeholder="8 dígitos"></label>
     <button id="clearSearch" type="button">Limpar</button>
   </div>
   <div id="searchSummary" class="search-summary"></div>
   <div id="searchResults"></div>
 </dialog>
 
-<script src="config.js"></script><script src="app.js"></script>
-</body></html>
+<dialog id="alertsDlg" class="alerts-dialog">
+  <div class="row">
+    <div><h3>Alertas de preparação</h3><p>Necessidades de acessórios para produções programadas.</p></div>
+    <button type="button" class="close" data-d="alertsDlg">✕</button>
+  </div>
+  <div id="alertsList"></div>
+</dialog>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
