@@ -28,6 +28,7 @@
     <button class="tab" data-v="clients">Clientes</button>
     <button class="tab" data-v="machines">Máquinas / Recursos</button>
     <button class="tab" data-v="people">Colaboradores</button>
+    <button class="tab" data-v="calendar">Calendário de Produção</button>
     <button id="openSearch" type="button">Pesquisa</button>
     <button id="backupBtn" type="button">Backup</button>
   </nav>
@@ -36,7 +37,7 @@
     <div class="row">
       <div>
         <h2 id="period"></h2>
-        <p>Clique numa célula para iniciar produção; clique numa barra para editar. Pode arrastar uma programação para outro dia. Domingo não trabalha e o sábado só conta quando estiver ativado.</p>
+        <p>Clique numa célula para iniciar produção; clique numa barra para editar. Pode arrastar uma programação para outro dia. Domingo não trabalha. Sábados e datas especiais são definidos no Calendário de Produção; cada produção decide se usa os sábados disponíveis.</p>
       </div>
       <div>
         <label class="weeks-select">Mostrar
@@ -54,6 +55,7 @@
     <div class="legend">
       <span><i class="g1"></i>Programada</span>
       <span><i class="g2"></i>Seguinte</span>
+      <span><i class="interrupted"></i>Interrompida</span>
       <span><i class="late"></i>Atrasada</span>
       <span><i class="we"></i>Fim de semana</span>
     </div>
@@ -62,9 +64,10 @@
 
   <section id="parts" class="view">
     <div class="row">
-      <div><h2>Peças / Tempos</h2><p>Código, designação, cliente, operações, compatibilidades e acessórios.</p></div>
+      <div><h2>Peças / Tempos</h2><p>Código, designação, cliente, operações, compatibilidades, acessórios e relatório dimensional.</p></div>
       <button id="addPart" class="primary">+ Adicionar peça</button>
     </div>
+    <div class="parts-filter"><label>Filtrar peças<input id="partsFilter" placeholder="Código, designação ou cliente"></label></div>
     <div class="card" id="partsTable"></div>
   </section>
 
@@ -81,6 +84,14 @@
     <div class="card" id="machinesTable"></div>
   </section>
 
+  <section id="calendar" class="view">
+    <div class="row">
+      <div><h2>Calendário de Produção</h2><p>Feriados, sábados disponíveis, encerramentos, férias coletivas e outros dias especiais.</p></div>
+      <button id="addCalendar" class="primary">+ Adicionar data</button>
+    </div>
+    <div class="card" id="calendarTable"></div>
+  </section>
+
   <section id="people" class="view">
     <div class="row">
       <div><h2>Colaboradores</h2><p>Horários, turnos e intervalos.</p></div>
@@ -90,7 +101,7 @@
   </section>
 </main>
 
-<footer>FABCAST · Planeamento - Maquinação · Versão 2.0</footer>
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.1</footer>
 
 <dialog id="jobDlg">
 <form id="jobForm">
@@ -106,13 +117,17 @@
     <label>Operador — manhã<select id="morn"></select></label>
     <label>Operador — tarde<select id="aft"></select></label>
     <label>Operador — noite<select id="night"></select></label>
-    <label>Estado<select id="status"><option>Programada</option><option>Concluída</option></select></label>
+    <label>Estado<select id="status"><option>Programada</option><option disabled>Interrompida</option><option>Concluída</option></select></label>
+    <label class="checkline"><input id="jobWorkSaturdays" type="checkbox"> Trabalhar aos sábados disponíveis</label>
     <label id="completedDateWrap" class="hidden">Data de conclusão<input id="jobCompletedDate" type="date"></label>
     <div class="forecast full"><small>Previsão</small><strong id="forecast"></strong></div>
+    <div id="jobInterruptionsWrap" class="full hidden"><h4>Histórico de interrupções</h4><div id="jobInterruptions"></div></div>
   </div>
   <p id="jobError" class="error"></p>
   <div class="actions">
-    <button type="button" id="delJob" class="danger hidden">Eliminar</button><span></span>
+    <button type="button" id="delJob" class="danger hidden">Eliminar</button>
+    <button type="button" id="interruptJob" class="warning hidden">Interromper produção</button>
+    <button type="button" id="resumeJob" class="primary hidden">Retomar produção</button><span></span>
     <button type="button" class="close" data-d="jobDlg">Cancelar</button>
     <button class="primary">Guardar</button>
   </div>
@@ -126,6 +141,7 @@
     <label>Código da peça<input id="pcode" maxlength="8" inputmode="numeric" required><small>Exatamente 8 dígitos e único.</small></label>
     <label>Cliente<select id="pclient"></select></label>
     <label class="full">Nome / designação da peça<input id="pdesc" required></label>
+    <label class="checkline full"><input id="pDimensional" type="checkbox"> Requer relatório dimensional / CMM</label>
   </div>
 
   <div class="row"><h4>Operações</h4><button type="button" id="addOp">+ Operação</button></div>
@@ -168,7 +184,12 @@
         <option>SL30</option><option>V8300</option><option>SERRALHARIA</option><option>OUTRO</option>
       </select>
     </label>
-    <label class="checkline"><input id="machineActive" type="checkbox" checked> Recurso ativo</label>
+    <label>Marca<input id="machineBrand" placeholder="Ex.: Haas"></label>
+    <label>Modelo<input id="machineModel" placeholder="Ex.: UMC-750"></label>
+    <label>Número de série<input id="machineSerial"></label>
+    <label>Ano<input id="machineYear" inputmode="numeric"></label>
+    <label>Estado<select id="machineCondition"><option>Ativa</option><option>Inativa</option><option>Avariada</option></select></label>
+    <label class="checkline"><input id="machineActive" type="checkbox" checked> Mostrar no planeamento</label>
   </div>
   <p id="machineError" class="error"></p>
   <div class="actions">
@@ -219,10 +240,60 @@
 
 <dialog id="alertsDlg" class="alerts-dialog">
   <div class="row">
-    <div><h3>Alertas de preparação</h3><p>Necessidades de acessórios para produções programadas.</p></div>
+    <div><h3>Alertas de preparação</h3><p>Acessórios e relatórios dimensionais/CMM para produções programadas.</p></div>
     <button type="button" class="close" data-d="alertsDlg">✕</button>
   </div>
   <div id="alertsList"></div>
+</dialog>
+
+<dialog id="calendarDlg">
+<form id="calendarForm">
+  <div class="row"><h3 id="calendarTitle">Data especial</h3><button type="button" class="close" data-d="calendarDlg">✕</button></div>
+  <div class="grid">
+    <label>Data<input id="calendarDate" type="date" required></label>
+    <label>Tipo<select id="calendarType"><option>Feriado</option><option>Sábado</option><option>Encerramento</option><option>Férias coletivas</option><option>Outro</option></select></label>
+    <label class="full">Descrição<input id="calendarDesc" placeholder="Ex.: Feriado municipal"></label>
+    <label class="checkline"><input id="calendarWorking" type="checkbox"> Dia útil / disponível para produção</label>
+    <label class="full">Observações<input id="calendarNotes"></label>
+  </div>
+  <p id="calendarError" class="error"></p>
+  <div class="actions"><button type="button" id="delCalendar" class="danger hidden">Eliminar</button><span></span><button type="button" class="close" data-d="calendarDlg">Cancelar</button><button class="primary">Guardar</button></div>
+</form>
+</dialog>
+
+<dialog id="interventionsDlg" class="alerts-dialog">
+  <div class="dialog-pad">
+    <div class="row"><div><h3 id="interventionsTitle">Histórico da máquina</h3><p>Avarias, manutenção e melhorias.</p></div><button type="button" class="close" data-d="interventionsDlg">✕</button></div>
+    <div class="row"><span></span><button id="addIntervention" type="button" class="primary">+ Registar intervenção</button></div>
+    <div id="interventionFormWrap" class="hidden intervention-form-wrap">
+      <form id="interventionForm">
+        <div class="grid">
+          <label>Data<input id="interventionDate" type="date" required></label>
+          <label>Tipo<select id="interventionType"><option>Avaria</option><option>Manutenção preventiva</option><option>Manutenção corretiva</option><option>Melhoria</option></select></label>
+          <label class="full">Descrição da avaria / motivo<input id="interventionFault"></label>
+          <label class="full">Trabalho realizado<input id="interventionWork"></label>
+          <label>Técnico / empresa<input id="interventionTechnician"></label>
+          <label>Paragem (h)<input id="interventionDowntime" type="number" min="0" step="0.1"></label>
+          <label class="full">Observações<input id="interventionNotes"></label>
+        </div>
+        <div class="actions"><span></span><button id="cancelIntervention" type="button">Cancelar</button><button class="primary">Guardar intervenção</button></div>
+      </form>
+    </div>
+    <div id="interventionsList"></div>
+  </div>
+</dialog>
+
+<dialog id="interruptDlg">
+<form id="interruptForm">
+  <div class="row"><div><h3>Interromper produção</h3><p>Registe o motivo e a hora de início da interrupção.</p></div><button type="button" class="close" data-d="interruptDlg">✕</button></div>
+  <div class="grid">
+    <label>Motivo<select id="interruptReason"><option>Falta de colaborador</option><option>Avaria</option><option>Falta de material</option><option>Aguardar controlo / CMM</option><option>Outro</option></select></label>
+    <label>Início<input id="interruptAt" type="datetime-local" required></label>
+    <label class="full">Detalhe / observação<input id="interruptOther" placeholder="Opcional"></label>
+    <label id="interruptMachineHistoryWrap" class="checkline full hidden"><input id="interruptMachineHistory" type="checkbox"> Registar também no histórico de intervenções da máquina</label>
+  </div>
+  <div class="actions"><span></span><button type="button" class="close" data-d="interruptDlg">Cancelar</button><button class="warning">Interromper</button></div>
+</form>
 </dialog>
 
 <script src="config.js"></script>

@@ -24,7 +24,7 @@ ops:[
 {id:'o2',part:'p1',op:'OP2',min:18,setup:2,groups:['UMC750','SL30','V8300']},
 {id:'o3',part:'p2',op:'OP1',min:32,setup:2,groups:['UMC750','UMC1000','SL30','V8300']}
 ],
-jobs:[],alerts:[]
+jobs:[],alerts:[],calendar:[]
 };
 
 const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);
@@ -50,6 +50,8 @@ function add(d,n){let x=new Date(d);x.setDate(x.getDate()+n);return x}
 function ds(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function pd(s){let [y,m,d]=String(s).split('-').map(Number);return new Date(y,m-1,d)}
 function compactDate(d){return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`}
+function localDateTimeValue(d=new Date()){let z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`}
+function fmtDateTime(v){if(!v)return '—';return new Date(v).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}
 function weekdayName(d){return ['domingo','segunda','terça','quarta','quinta','sexta','sábado'][d.getDay()]}
 function part(id){return state.parts.find(x=>x.id===id)}
 function op(id){return state.ops.find(x=>x.id===id)}
@@ -77,13 +79,18 @@ function normalizeState(){
  state.ops=Array.isArray(state.ops)?state.ops:[];
  state.jobs=Array.isArray(state.jobs)?state.jobs:[];
  state.alerts=Array.isArray(state.alerts)?state.alerts:[];
+ state.alerts.forEach(a=>{if(!a.type)a.type='accessory'});
  state.saturdays=state.saturdays&&typeof state.saturdays==='object'?state.saturdays:{};
+ state.calendar=Array.isArray(state.calendar)?state.calendar:[];
+ Object.entries(state.saturdays||{}).filter(([,v])=>v).forEach(([date])=>{if(!state.calendar.some(x=>x.date===date))state.calendar.push({id:uid('cal'),date,type:'Sábado',description:'Sábado disponível (migrado da V2.0)',working:true,notes:''})});
 
- state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[]});
+ state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[];if(p.dimensionalReport===undefined)p.dimensionalReport=false});
  state.jobs.forEach(j=>{
    if(j.of===undefined)j.of='';
    if(j.completedDate===undefined)j.completedDate=null;
    if(j.plannedEnd===undefined)j.plannedEnd=null;
+   if(j.workSaturdays===undefined)j.workSaturdays=false;
+   if(!Array.isArray(j.interruptions))j.interruptions=[];
  });
  state.employees.forEach(e=>{
    const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
@@ -94,6 +101,8 @@ function normalizeState(){
 
  state.machines.forEach(m=>{
    m.group=machineGroupForCode(m.code,m.group);
+   if(m.brand===undefined)m.brand='';if(m.model===undefined)m.model='';if(m.serial===undefined)m.serial='';if(m.year===undefined)m.year='';
+   if(!Array.isArray(m.interventions))m.interventions=[];if(m.condition===undefined)m.condition=m.active===false?'Inativa':'Ativa';
    if(m.type===undefined)m.type=m.code.toLowerCase()==='serralharia'?'Serralharia':'CNC';
    if(m.active===undefined)m.active=true;
    m.order=machineOrder(m);
@@ -111,11 +120,11 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:20,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{}};
+ return {version:21,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
- for(const k of ['clients','machines','employees','parts','ops','jobs','alerts'])if(Array.isArray(data[k]))state[k]=data[k];
+ for(const k of ['clients','machines','employees','parts','ops','jobs','alerts','calendar'])if(Array.isArray(data[k]))state[k]=data[k];
  if(data.saturdays&&typeof data.saturdays==='object')state.saturdays=data.saturdays;
  normalizeState();
  return true;
@@ -140,7 +149,7 @@ async function writeRemoteState(){
 }
 function scheduleRemoteSave(){if(!remoteReady)return;clearTimeout(remoteSyncTimer);remoteSyncTimer=setTimeout(writeRemoteState,350)}
 function save(){
- localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts}));
+ localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar}));
  localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
  scheduleRemoteSave();
 }
@@ -151,7 +160,7 @@ async function bootstrapRemote(){
    const rows=await sbFetch('app_state?id=eq.1&select=data,updated_at');
    if(Array.isArray(rows)&&rows.length&&rows[0].data){
      applySnapshot(rows[0].data);
-     localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts}));
+     localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar}));
      localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
    }else{
      await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
@@ -169,20 +178,31 @@ function fmtHours(h){let mins=Math.round(h*60),hh=Math.floor(mins/60),mm=mins%60
 function turns(j){return [j.m,j.a,j.n].filter(Boolean).length}
 function hrs(j){let o=op(j.op);return o?o.setup+j.qty*o.min/60:0}
 
-function saturdayActive(d){return !!state.saturdays[ds(d)]}
-function workingDay(d){let w=d.getDay();if(w===0)return false;if(w===6)return saturdayActive(d);return true}
-function nextWorkingDay(d){let x=new Date(d);do{x=add(x,1)}while(!workingDay(x));return x}
-function normalizeStartDate(d){let x=new Date(d);while(!workingDay(x))x=add(x,1);return x}
+function calendarEntry(d){return state.calendar.find(x=>x.date===ds(d))}
+function saturdayActive(d){let e=calendarEntry(d);return d.getDay()===6&&!!(e&&e.working)}
+function factoryWorkingDay(d){let w=d.getDay(),e=calendarEntry(d);if(w===0)return false;if(e)return !!e.working;if(w===6)return false;return true}
+function jobWorkingDay(j,d){if(!factoryWorkingDay(d))return false;if(d.getDay()===6)return !!j?.workSaturdays;return true}
+function nextWorkingDay(d,j=null){let x=new Date(d);do{x=add(x,1)}while(j?!jobWorkingDay(j,x):!factoryWorkingDay(x));return x}
+function normalizeStartDate(d,j=null){let x=new Date(d);while(j?!jobWorkingDay(j,x):!factoryWorkingDay(x))x=add(x,1);return x}
+function interruptionLostDays(j,it,endIso=null){
+ let a=new Date(it.startAt),b=new Date(endIso||it.resumeAt||new Date());if(!(a<b))return 0;
+ let total=0,cur=new Date(a);cur.setHours(0,0,0,0);
+ while(cur<b){let nxt=add(cur,1),from=Math.max(a,cur),to=Math.min(b,nxt);if(jobWorkingDay(j,cur)&&to>from)total+=(to-from)/86400000;cur=nxt}
+ return total;
+}
+function interruptionDelayDays(j){return (j.interruptions||[]).reduce((sum,it)=>sum+interruptionLostDays(j,it),0)}
+function effectiveHours(j){let cap=jobCapacityHours(j);return hrs(j)+(cap>0?interruptionDelayDays(j)*cap:0)}
+function activeInterruption(j){return (j.interruptions||[]).find(it=>!it.resumeAt)||null}
 
 function jobWorkSegments(j){
- let remaining=hrs(j),cap=jobCapacityHours(j),segments=[];
+ let remaining=effectiveHours(j),cap=jobCapacityHours(j),segments=[];
  if(cap<=0)return segments;
- let cur=normalizeStartDate(pd(j.start)),guard=0;
+ let cur=normalizeStartDate(pd(j.start),j),guard=0;
  while(remaining>1e-9&&guard++<1000){
    let used=Math.min(cap,remaining);
    segments.push({date:new Date(cur),frac:Math.min(1,used/cap)});
    remaining-=used;
-   if(remaining>1e-9)cur=nextWorkingDay(cur);
+   if(remaining>1e-9)cur=nextWorkingDay(cur,j);
  }
  return segments;
 }
@@ -192,11 +212,8 @@ function end(j){
  let last=segs[segs.length-1];
  return new Date(last.date.getTime()+last.frac*86400000);
 }
-function jobLastWorkDate(j){
- let segs=jobWorkSegments(j);
- return segs.length?segs[segs.length-1].date:pd(j.start);
-}
-function nextStartAfterJob(j){return nextWorkingDay(jobLastWorkDate(j))}
+function jobLastWorkDate(j){let segs=jobWorkSegments(j);return segs.length?segs[segs.length-1].date:pd(j.start)}
+function nextStartAfterJob(j,targetJob=null){return nextWorkingDay(jobLastWorkDate(j),targetJob)}
 function dur(j){return (end(j)-pd(j.start))/86400000}
 
 function isoWeek(d){
@@ -216,7 +233,7 @@ function tabs(){
 }
 
 function render(){
- gantt();partsTable();clientsTable();machinesTable();peopleTable();fillPeople();renderAlertBadge();
+ gantt();partsTable();clientsTable();machinesTable();peopleTable();calendarTable();fillPeople();renderAlertBadge();
 }
 
 function canRunOnMachine(job,mid){let o=op(job.op),m=mach(mid);return !!(o&&m&&o.groups.includes(m.group))}
@@ -252,7 +269,7 @@ function sequenceCheck(j){
    .filter(x=>x.id!==j.id&&x.of===j.of&&x.op===prevOp.id)
    .sort((a,b)=>pd(b.start)-pd(a.start))[0];
  if(!prevJob)return {ok:false,msg:`${curOp.op} não pode ser planeada antes de ${prevOp.op}. Não encontrei ${prevOp.op} para a OF ${j.of}.`};
- let earliest=prevJob.status==='Concluída'&&prevJob.completedDate?nextWorkingDay(pd(prevJob.completedDate)):nextStartAfterJob(prevJob);
+ let earliest=prevJob.status==='Concluída'&&prevJob.completedDate?nextWorkingDay(pd(prevJob.completedDate),j):nextStartAfterJob(prevJob,j);
  if(pd(j.start)<earliest){
    return {ok:false,msg:`${curOp.op} só pode iniciar depois de ${prevOp.op}. Primeira data válida: ${earliest.toLocaleDateString('pt-PT')}.`,earliest};
  }
@@ -264,7 +281,8 @@ function moveJobByDrag(jobId,mid,dateStr){
  if(!j)return;
  if(j.status==='Concluída')return alert('Esta produção está concluída e encontra-se bloqueada.');
  let target=pd(dateStr);
- if(!workingDay(target))return alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Ative-o primeiro.');
+ if(!factoryWorkingDay(target))return alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no calendário de produção.');
+ if(target.getDay()===6&&!j.workSaturdays)return alert('Esta produção não está autorizada a trabalhar ao sábado. Ative “Trabalhar aos sábados disponíveis” na produção.');
  if(!canRunOnMachine(j,mid))return alert('Esta peça/operação não pode ser executada nesta máquina.');
  let test={...j,machine:mid,start:dateStr},seq=sequenceCheck(test);
  if(!seq.ok)return alert(seq.msg);
@@ -303,15 +321,14 @@ function gantt(){
  let h=document.createElement('div');h.className='hdr';
  h.style.gridTemplateColumns=`155px repeat(${totalDays},minmax(var(--day-min),1fr))`;h.innerHTML='<div>Data</div>';
  for(let i=0;i<totalDays;i++){
-   let d=add(state.start,i),w=d.getDay(),cls=(w===0||w===6)?'weekend':'';
+   let d=add(state.start,i),w=d.getDay(),cls=(w===0||w===6)?'weekend':'';if(!factoryWorkingDay(d))cls+=' nonworking-date';
    if(w===6)cls+=' saturday-toggle'+(saturdayActive(d)?' sat-active':'');
    if(w===0)cls+=' sunday-locked';
    h.innerHTML+=`<div class="${cls.trim()}" data-day="${i}"><span class="weekday">${esc(weekdayName(d))}</span><span class="date-under">${esc(compactDate(d))}</span></div>`;
  }
  g.appendChild(h);
  h.querySelectorAll('.saturday-toggle').forEach(el=>el.addEventListener('click',()=>{
-   let d=add(state.start,Number(el.dataset.day)),key=ds(d);state.saturdays[key]=!state.saturdays[key];
-   repushAll();save();render();
+   let d=add(state.start,Number(el.dataset.day));calendarDlg(ds(d));
  }));
 
  let machines=[...state.machines].filter(m=>m.active!==false).sort((a,b)=>machineOrder(a)-machineOrder(b));
@@ -321,7 +338,7 @@ function gantt(){
    let n=document.createElement('div');n.className='mname';n.textContent=m.code;r.appendChild(n);
 
    for(let i=0;i<totalDays;i++){
-     let d=add(state.start,i),w=d.getDay(),work=workingDay(d),c=document.createElement('div');
+     let d=add(state.start,i),w=d.getDay(),work=factoryWorkingDay(d),c=document.createElement('div');
      c.className='cell'+((w===0||w===6)?' weekend':'')+(w===6&&work?' sat-active':'')+(!work?' nonworking':'');
      c.dataset.machine=m.id;c.dataset.date=ds(d);
      if(work){
@@ -330,20 +347,24 @@ function gantt(){
        c.addEventListener('drop',ev=>{ev.preventDefault();c.classList.remove('drag-target');let id=ev.dataTransfer.getData('text/plain');if(id)moveJobByDrag(id,m.id,ds(d))});
      }
      let bt=document.createElement('button');bt.textContent='+';
-     if(work)bt.onclick=()=>newJob(m.id,i);else{bt.disabled=true;bt.title=w===0?'Domingo sem trabalho':'Sábado inativo — clique no cabeçalho para ativar'}
+     if(work)bt.onclick=()=>newJob(m.id,i);else{bt.disabled=true;bt.title=w===0?'Domingo sem trabalho':'Data não disponível — configure no Calendário de Produção'}
      c.appendChild(bt);r.appendChild(c);
    }
 
    let jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>pd(a.start)-pd(b.start));
    jobs.forEach((j,idx)=>{
-     let o=op(j.op),p=part(o?.part),runs=jobRuns(j),labelDone=false;
+     let o=op(j.op),p=part(o?.part),runs=jobRuns(j),labelDone=false,dimAlert=state.alerts.find(a=>a.jobId===j.id&&a.type==='dimensional'&&!a.archived&&!a.closed),dimPending=false;
+     dimPending=!!(dimAlert&&!dimAlert.read);
      let names=[j.m,j.a,j.n].filter(Boolean).map(id=>emp(id)?.name).filter(Boolean).join(', ')||'Sem operador';
      let tooltip=[
        `OF: ${j.of||'—'}`,`Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,
        `Quantidade: ${j.qty}`,`Tempo: ${hrs(j).toFixed(1)} h`,`Capacidade: ${fmtHours(jobCapacityHours(j))}/dia`,
        `Operadores: ${names}`,`Início: ${pd(j.start).toLocaleDateString('pt-PT')}`,
        `Fim previsto: ${jobLastWorkDate(j).toLocaleDateString('pt-PT')}`,
-       j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:''
+       j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
+       j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
+       p?.dimensionalReport?`Relatório dimensional: necessário (${dimPending?'PENDENTE':'alerta lido'})`:'',
+       (j.interruptions||[]).length?`Interrupções: ${(j.interruptions||[]).length} · atraso acumulado ${interruptionDelayDays(j).toFixed(1)} dia(s)`:''
      ].filter(Boolean).join('\n');
 
      runs.forEach(run=>{
@@ -353,11 +374,11 @@ function gantt(){
        let s=Math.max(0,off),ee=Math.min(totalDays,off+width),v=ee-s;
        if(v<=0)return;
        let b=document.createElement('button');
-       b.className='bar segment '+(j.status==='Concluída'?'done':end(j)<new Date()?'late':idx%2?'g2':'g1')+(labelDone?' blank':'');
+       b.className='bar segment '+(j.status==='Concluída'?'done':j.status==='Interrompida'?'interrupted':end(j)<new Date()?'late':idx===0?'g1':'g2')+(labelDone?' blank':'');
        b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
        b.style.width=`calc((100% - 155px) * ${v/totalDays} - 3px)`;
        if(!labelDone){
-         b.innerHTML=`<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span class="bar-name">${esc(p?.desc||'')}</span>`;
+         b.innerHTML=`${dimPending?'<span class="dim-dot" title="Relatório dimensional pendente"></span>':''}<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span class="bar-name">${esc(p?.desc||'')}</span>`;
          labelDone=true;
        }
        b.title=tooltip;
@@ -375,14 +396,18 @@ function gantt(){
 
 let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null,editMachine=null;
 
+function renderJobInterruptions(j){
+ let arr=j?.interruptions||[];$('jobInterruptionsWrap').classList.toggle('hidden',!arr.length);$('jobInterruptions').innerHTML=arr.map(it=>`<div class="job-int-row"><strong>${esc(it.reason)}</strong>${it.detail?` · ${esc(it.detail)}`:''}<small>Início: ${fmtDateTime(it.startAt)} · ${it.resumeAt?'Retomada: '+fmtDateTime(it.resumeAt):'<strong>EM CURSO</strong>'}</small></div>`).join('');
+}
+
 function newJob(mid,day){
  let requested=add(state.start,day);
- if(!workingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo. Clique no cabeçalho para o ativar.');
+ if(!factoryWorkingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.');
  editJob=null;jobCtx={mid,day};$('jobError').textContent='';
  $('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${requested.toLocaleDateString('pt-PT')}`;
  fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobOF').value='';$('jobCompletedDate').value='';
  $('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';
- $('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
+ renderJobInterruptions(null);$('jobWorkSaturdays').checked=requested.getDay()===6;$('interruptJob').classList.add('hidden');$('resumeJob').classList.add('hidden');$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j){
  editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
@@ -390,14 +415,14 @@ function editJobOpen(j){
  fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobOF').value=j.of||'';
  $('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
  $('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';
- $('status').value=j.status||'Programada';$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
+ $('status').value=j.status||'Programada';renderJobInterruptions(j);$('jobWorkSaturdays').checked=!!j.workSaturdays;$('interruptJob').classList.toggle('hidden',j.status==='Concluída'||j.status==='Interrompida');$('resumeJob').classList.toggle('hidden',j.status!=='Interrompida');$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
  let old=state.jobs.find(x=>x.id===editJob);
  let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day));
  return {id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),
    start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
-   completedDate:$('jobCompletedDate').value||null,plannedEnd:old?.plannedEnd||null};
+   completedDate:$('jobCompletedDate').value||null,plannedEnd:old?.plannedEnd||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[])};
 }
 function forecast(){
  if(!$('jobOp').value){$('forecast').textContent='Sem operação compatível';return}
@@ -408,7 +433,7 @@ function forecast(){
  if(!seq.ok)txt+=` · ⚠ ${seq.msg}`;
  $('forecast').textContent=txt;
 }
-['jobOp','jobQty','jobDate','jobOF','morn','aft','night'].forEach(id=>$(id).addEventListener('input',forecast));
+['jobOp','jobQty','jobDate','jobOF','morn','aft','night','jobWorkSaturdays'].forEach(id=>$(id).addEventListener('input',forecast));
 $('status').addEventListener('change',()=>{
  let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;
  if(done&&!$('jobCompletedDate').value)$('jobCompletedDate').value=ds(new Date());
@@ -416,32 +441,27 @@ $('status').addEventListener('change',()=>{
 });
 
 function syncJobAlert(j){
- let o=op(j.op),p=part(o?.part),acc=p?.accessories||[];
- let existing=state.alerts.find(a=>a.jobId===j.id&&!a.archived);
- if(j.status==='Concluída'||!acc.length){
-   if(existing){existing.closed=true;existing.updatedAt=new Date().toISOString()}
-   return;
+ let o=op(j.op),p=part(o?.part);if(!p)return;
+ const now=new Date().toISOString();
+ function upsert(type,payload,needed){
+   let existing=state.alerts.find(a=>a.jobId===j.id&&a.type===type&&!a.archived);
+   if(j.status==='Concluída'||!needed){if(existing){existing.closed=true;existing.updatedAt=now}return}
+   let signature=JSON.stringify(payload);
+   if(!existing){state.alerts.push({id:uid('al'),type,jobId:j.id,...payload,signature,read:false,closed:false,createdAt:now,updatedAt:now})}
+   else{let changed=existing.signature!==signature;Object.assign(existing,payload,{signature,closed:false,updatedAt:now});if(changed)existing.read=false}
  }
- let items=acc.map(a=>({name:a.name,qtyPerPiece:+a.qty,total:+a.qty*j.qty}));
- let signature=JSON.stringify({qty:j.qty,start:j.start,of:j.of,items});
- if(!existing){
-   state.alerts.push({id:uid('al'),jobId:j.id,of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items,signature,read:false,closed:false,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
- }else{
-   let changed=existing.signature!==signature;
-   Object.assign(existing,{of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items,signature,closed:false,updatedAt:new Date().toISOString()});
-   if(changed)existing.read=false;
- }
+ let acc=p.accessories||[],items=acc.map(a=>({name:a.name,qtyPerPiece:+a.qty,total:+a.qty*j.qty}));
+ upsert('accessory',{of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items},acc.length>0);
+ upsert('dimensional',{of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,items:[]},!!p.dimensionalReport);
 }
-function syncAlertsForPart(pid){
- let opIds=state.ops.filter(o=>o.part===pid).map(o=>o.id);
- state.jobs.filter(j=>opIds.includes(j.op)).forEach(syncJobAlert);
-}
+function syncAlertsForPart(pid){let opIds=state.ops.filter(o=>o.part===pid).map(o=>o.id);state.jobs.filter(j=>opIds.includes(j.op)).forEach(syncJobAlert)}
 
 $('jobForm').onsubmit=e=>{
  e.preventDefault();$('jobError').textContent='';
  let j=formJob(),old=state.jobs.find(x=>x.id===j.id);
  if(!j.op)return $('jobError').textContent='Não existe operação compatível selecionada.';
- if(!workingDay(pd(j.start)))return $('jobError').textContent=pd(j.start).getDay()===0?'Domingo não é dia de trabalho.':'Este sábado está inativo.';
+ if(!factoryWorkingDay(pd(j.start)))return $('jobError').textContent=pd(j.start).getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.';
+ if(pd(j.start).getDay()===6&&!j.workSaturdays)return $('jobError').textContent='Para iniciar ao sábado, ative “Trabalhar aos sábados disponíveis”.';
  if(!turns(j))return $('jobError').textContent='Escolha pelo menos um operador.';
  let seq=sequenceCheck(j);if(!seq.ok)return $('jobError').textContent=seq.msg;
 
@@ -461,12 +481,12 @@ $('jobForm').onsubmit=e=>{
 function push(mid){
  let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));
  for(let i=0;i<a.length;i++){
-   let cur=a[i],ns=normalizeStartDate(pd(cur.start));
+   let cur=a[i],ns=normalizeStartDate(pd(cur.start),cur);
    if(ns>pd(cur.start))cur.start=ds(ns);
    if(i===0)continue;
    let prev=a[i-1],last=jobLastWorkDate(prev),curStart=pd(cur.start);
    if(curStart<=last){
-     let next=nextWorkingDay(last);
+     let next=nextWorkingDay(last,cur);
      if(next>curStart)cur.start=ds(next);
    }
  }
@@ -503,22 +523,23 @@ function accessoryRow(a={id:'',name:'',qty:1}){
  r.querySelector('.aremove').onclick=()=>r.remove();$('accessories').appendChild(r);
 }
 function partsTable(){
- $('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th>Acessórios</th><th></th></tr></thead>
- <tbody>${state.parts.slice().sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr>
+ let q=($('partsFilter')?.value||'').trim().toLowerCase();let list=state.parts.filter(p=>!q||p.code.toLowerCase().includes(q)||(p.desc||'').toLowerCase().includes(q)||cname(p.client).toLowerCase().includes(q));
+ $('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th>Acessórios</th><th>Relatório dimensional</th><th></th></tr></thead>
+ <tbody>${list.slice().sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr>
  <td><strong>${esc(p.code)}</strong></td><td>${esc(p.desc)}</td><td>${esc(cname(p.client))}</td>
  <td>${state.ops.filter(o=>o.part===p.id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).map(o=>`${esc(o.op)} · ${o.min} min · ${o.groups.map(g=>g==='SERRALHARIA'?'Serralharia':g).join(', ')}`).join('<br>')}</td>
- <td>${(p.accessories||[]).map(a=>`${esc(a.name)} · ${a.qty}/pç`).join('<br>')||'—'}</td>
+ <td>${(p.accessories||[]).map(a=>`${esc(a.name)} · ${a.qty}/pç`).join('<br>')||'—'}</td><td>${p.dimensionalReport?'Sim':'—'}</td>
  <td><button class="edit ep" data-id="${p.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
  document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id));
 }
 function partDlg(id=null){
  editPart=id;fillClients();$('ops').innerHTML='';$('accessories').innerHTML='';$('perror').textContent='';
  if(id){
-   let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;
+   let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;$('pDimensional').checked=!!p.dimensionalReport;
    state.ops.filter(o=>o.part===id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).forEach(opRow);
    (p.accessories||[]).forEach(accessoryRow);$('delPart').classList.remove('hidden');
  }else{
-   $('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';opRow({op:'OP1',min:10,setup:0,groups:[]});$('delPart').classList.add('hidden');
+   $('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';$('pDimensional').checked=false;opRow({op:'OP1',min:10,setup:0,groups:[]});$('delPart').classList.add('hidden');
  }
  $('partDlg').showModal();
 }
@@ -535,7 +556,7 @@ $('partForm').onsubmit=e=>{
  let labels=rows.map(r=>r.querySelector('.oc').value.trim().toUpperCase());
  if(new Set(labels).size!==labels.length)return $('perror').textContent='Não pode haver operações duplicadas.';
  let accessories=[...$('accessories').querySelectorAll('.accrow')].map(r=>({id:r.dataset.id||uid('a'),name:r.querySelector('.aname').value.trim(),qty:+r.querySelector('.aqty').value})).filter(a=>a.name&&a.qty>0);
- let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value,accessories};
+ let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value,accessories,dimensionalReport:$('pDimensional').checked};
  let pi=state.parts.findIndex(x=>x.id===pid);if(pi>=0)state.parts[pi]=p;else state.parts.push(p);
  let keep=[];
  for(let r of rows){
@@ -565,15 +586,15 @@ $('clientForm').onsubmit=e=>{e.preventDefault();let c={id:editClient||uid('c'),n
 $('delClient').onclick=()=>{if(state.parts.some(p=>p.client===editClient))return alert('Este cliente está associado a peças.');state.clients=state.clients.filter(c=>c.id!==editClient);save();$('clientDlg').close();render()};
 
 function machinesTable(){
- $('machinesTable').innerHTML=`<table><thead><tr><th>Ordem</th><th>Recurso</th><th>Tipo</th><th>Grupo</th><th>Estado</th><th></th></tr></thead><tbody>
+ $('machinesTable').innerHTML=`<table><thead><tr><th>Ordem</th><th>Recurso</th><th>Tipo</th><th>Grupo</th><th>Marca / Modelo</th><th>Estado</th><th>Intervenções</th><th></th></tr></thead><tbody>
  ${state.machines.slice().sort((a,b)=>machineOrder(a)-machineOrder(b)).map((m,i)=>`<tr class="${m.active===false?'machine-inactive':''}">
  <td class="machine-order">${i+1}</td><td><strong>${esc(m.code)}</strong></td><td>${esc(m.type||'CNC')}</td><td>${esc(m.group)}</td>
- <td>${m.active===false?'Inativo':'Ativo'}</td><td><button class="edit emach" data-id="${m.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
- document.querySelectorAll('.emach').forEach(b=>b.onclick=()=>machineDlg(b.dataset.id));
+ <td>${esc([m.brand,m.model].filter(Boolean).join(' / ')||'—')}</td><td>${esc(m.condition|| (m.active===false?'Inativa':'Ativa'))}</td><td><button class="edit mint" data-id="${m.id}">${(m.interventions||[]).length} · Histórico</button></td><td><button class="edit emach" data-id="${m.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
+ document.querySelectorAll('.emach').forEach(b=>b.onclick=()=>machineDlg(b.dataset.id));document.querySelectorAll('.mint').forEach(b=>b.onclick=()=>interventionsDlg(b.dataset.id));
 }
 function machineDlg(id=null){
  editMachine=id;let m=mach(id);$('machineError').textContent='';$('machineTitle').textContent=id?'Editar máquina / recurso':'Adicionar máquina / recurso';
- $('machineCode').value=m?.code||'';$('machineType').value=m?.type||'CNC';$('machineGroup').value=m?.group||'OUTRO';$('machineActive').checked=m?.active!==false;
+ $('machineCode').value=m?.code||'';$('machineType').value=m?.type||'CNC';$('machineGroup').value=m?.group||'OUTRO';$('machineActive').checked=m?.active!==false;$('machineBrand').value=m?.brand||'';$('machineModel').value=m?.model||'';$('machineSerial').value=m?.serial||'';$('machineYear').value=m?.year||'';$('machineCondition').value=m?.condition||'Ativa';
  $('delMachine').classList.toggle('hidden',!id);$('machineCode').disabled=!!(id&&state.jobs.some(j=>j.machine===id));$('machineDlg').showModal();
 }
 $('addMachine').onclick=()=>machineDlg();
@@ -581,7 +602,7 @@ $('machineForm').onsubmit=e=>{
  e.preventDefault();$('machineError').textContent='';
  let old=mach(editMachine),code=$('machineCode').value.trim();
  if(state.machines.some(m=>m.code.toLowerCase()===code.toLowerCase()&&m.id!==editMachine))return $('machineError').textContent='Já existe um recurso com este nome.';
- let m={id:editMachine||uid('m'),code:old?.code||code,type:$('machineType').value,group:$('machineGroup').value,active:$('machineActive').checked,order:old?.order??100};
+ let m={id:editMachine||uid('m'),code:old?.code||code,type:$('machineType').value,group:$('machineGroup').value,active:$('machineActive').checked,order:old?.order??100,brand:$('machineBrand').value.trim(),model:$('machineModel').value.trim(),serial:$('machineSerial').value.trim(),year:$('machineYear').value.trim(),condition:$('machineCondition').value,interventions:structuredClone(old?.interventions||[])};
  if(!editMachine)m.code=code;
  let i=state.machines.findIndex(x=>x.id===m.id);if(i>=0)state.machines[i]=m;else state.machines.push(m);
  normalizeState();save();$('machineDlg').close();render();
@@ -590,6 +611,32 @@ $('delMachine').onclick=()=>{
  if(state.jobs.some(j=>j.machine===editMachine))return $('machineError').textContent='Este recurso tem histórico. Marque-o como inativo em vez de eliminar.';
  state.machines=state.machines.filter(m=>m.id!==editMachine);save();$('machineDlg').close();render();
 };
+
+let editCalendar=null,currentInterventionMachine=null;
+function calendarTable(){
+ let rows=[...state.calendar].sort((a,b)=>a.date.localeCompare(b.date));
+ $('calendarTable').innerHTML=`<table><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Dia útil?</th><th>Observações</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><strong>${pd(x.date).toLocaleDateString('pt-PT')}</strong></td><td>${esc(x.type)}</td><td>${esc(x.description||'')}</td><td>${x.working?'Sim':'Não'}</td><td>${esc(x.notes||'')}</td><td><button class="edit ecal" data-id="${x.id}">Editar</button></td></tr>`).join('')||'<tr><td colspan="6">Sem datas especiais configuradas.</td></tr>'}</tbody></table>`;
+ document.querySelectorAll('.ecal').forEach(b=>b.onclick=()=>calendarDlg(null,b.dataset.id));
+}
+function calendarDlg(date=null,id=null){
+ editCalendar=id;let x=state.calendar.find(v=>v.id===id);$('calendarTitle').textContent=x?'Editar data especial':'Adicionar data especial';$('calendarError').textContent='';
+ $('calendarDate').value=x?.date||date||ds(new Date());$('calendarType').value=x?.type||(($('calendarDate').value&&pd($('calendarDate').value).getDay()===6)?'Sábado':'Feriado');$('calendarDesc').value=x?.description||'';$('calendarWorking').checked=x?.working??(pd($('calendarDate').value).getDay()===6);$('calendarNotes').value=x?.notes||'';$('delCalendar').classList.toggle('hidden',!x);$('calendarDlg').showModal();
+}
+$('addCalendar').onclick=()=>calendarDlg();
+$('calendarForm').onsubmit=e=>{e.preventDefault();let date=$('calendarDate').value;if(pd(date).getDay()===0&&$('calendarWorking').checked)return $('calendarError').textContent='O domingo permanece sempre sem trabalho.';let x={id:editCalendar||uid('cal'),date,type:$('calendarType').value,description:$('calendarDesc').value.trim(),working:$('calendarWorking').checked,notes:$('calendarNotes').value.trim()};let dup=state.calendar.find(v=>v.date===date&&v.id!==x.id);if(dup)return $('calendarError').textContent='Já existe uma configuração para esta data.';let i=state.calendar.findIndex(v=>v.id===x.id);if(i>=0)state.calendar[i]=x;else state.calendar.push(x);repushAll();save();$('calendarDlg').close();render()};
+$('delCalendar').onclick=()=>{state.calendar=state.calendar.filter(x=>x.id!==editCalendar);repushAll();save();$('calendarDlg').close();render()};
+
+function interventionsDlg(mid){currentInterventionMachine=mid;let m=mach(mid);$('interventionsTitle').textContent=`Histórico — ${m?.code||''}`;renderInterventions();$('interventionsDlg').showModal()}
+function renderInterventions(){let m=mach(currentInterventionMachine),a=[...(m?.interventions||[])].sort((x,y)=>(y.date||'').localeCompare(x.date||''));$('interventionsList').innerHTML=a.length?a.map(x=>`<div class="intervention-card"><strong>${x.date?pd(x.date).toLocaleDateString('pt-PT'):'—'} · ${esc(x.type)}</strong><div>${esc(x.fault||'')}</div><small>${esc(x.work||'')}${x.technician?' · '+esc(x.technician):''}${x.downtime?' · Paragem: '+esc(x.downtime)+' h':''}</small>${x.notes?`<small>${esc(x.notes)}</small>`:''}</div>`).join(''):'<div class="no-alerts">Sem intervenções registadas.</div>'}
+$('addIntervention').onclick=()=>{$('interventionDate').value=ds(new Date());$('interventionType').value='Avaria';$('interventionFault').value='';$('interventionWork').value='';$('interventionTechnician').value='';$('interventionDowntime').value='';$('interventionNotes').value='';$('interventionFormWrap').classList.remove('hidden')};
+$('cancelIntervention').onclick=()=>$('interventionFormWrap').classList.add('hidden');
+$('interventionForm').onsubmit=e=>{e.preventDefault();let m=mach(currentInterventionMachine);if(!m)return;m.interventions.push({id:uid('mi'),date:$('interventionDate').value,type:$('interventionType').value,fault:$('interventionFault').value.trim(),work:$('interventionWork').value.trim(),technician:$('interventionTechnician').value.trim(),downtime:$('interventionDowntime').value,notes:$('interventionNotes').value.trim()});save();$('interventionFormWrap').classList.add('hidden');renderInterventions();machinesTable()};
+
+function interruptJobOpen(){let j=state.jobs.find(x=>x.id===editJob);if(!j)return;$('interruptReason').value='Falta de colaborador';$('interruptOther').value='';$('interruptAt').value=localDateTimeValue();$('interruptMachineHistory').checked=false;$('interruptMachineHistoryWrap').classList.add('hidden');$('interruptDlg').showModal()}
+$('interruptReason').onchange=()=>$('interruptMachineHistoryWrap').classList.toggle('hidden',$('interruptReason').value!=='Avaria');
+$('interruptJob').onclick=interruptJobOpen;
+$('interruptForm').onsubmit=e=>{e.preventDefault();let j=state.jobs.find(x=>x.id===editJob);if(!j)return;let reason=$('interruptReason').value,detail=$('interruptOther').value.trim();j.interruptions.push({id:uid('int'),reason,detail,startAt:new Date($('interruptAt').value).toISOString(),resumeAt:null});j.status='Interrompida';if(reason==='Avaria'&&$('interruptMachineHistory').checked){let m=mach(j.machine);m.interventions.push({id:uid('mi'),date:$('interruptAt').value.slice(0,10),type:'Avaria',fault:detail||`Avaria durante OF ${j.of||'—'}`,work:'',technician:'',downtime:'',notes:`Registo criado a partir da interrupção da OF ${j.of||'—'}`})}syncJobAlert(j);push(j.machine);save();$('interruptDlg').close();$('jobDlg').close();render()};
+$('resumeJob').onclick=()=>{let j=state.jobs.find(x=>x.id===editJob),it=activeInterruption(j);if(!it)return;it.resumeAt=new Date().toISOString();j.status='Programada';syncJobAlert(j);push(j.machine);save();$('jobDlg').close();render()};
 
 function peopleTable(){
  $('peopleTable').innerHTML=`<table><thead><tr><th>Colaborador</th><th>Turno</th><th>Horário</th><th>Intervalos</th><th>Horas líquidas</th><th></th></tr></thead><tbody>${state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.shift)}</td><td>${esc(e.start)}–${esc(e.end)}</td><td>${(e.breaks||[]).map(b=>`${esc(b.start)}–${esc(b.end)}`).join('<br>')||'—'}</td><td><strong>${fmtHours(netHours(e))}</strong></td><td><button class="edit ee" data-id="${e.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
@@ -643,16 +690,16 @@ function renderAlertBadge(){
 }
 function renderAlerts(){
  let arr=pendingAlerts().sort((a,b)=>String(a.start).localeCompare(String(b.start)));
- $('alertsList').innerHTML=arr.length?arr.map(a=>`<div class="alert-card"><h4>OF ${esc(a.of||'—')} — ${esc(a.partCode)} — ${esc(a.partDesc)}</h4>
+ $('alertsList').innerHTML=arr.length?arr.map(a=>`<div class="alert-card ${a.type==='dimensional'?'dimensional-alert':''}"><h4>${a.type==='dimensional'?'Relatório dimensional / CMM':'Acessórios'} · OF ${esc(a.of||'—')} — ${esc(a.partCode)} — ${esc(a.partDesc)}</h4>
  <div>Produção: <strong>${a.qty} peças</strong> · início ${pd(a.start).toLocaleDateString('pt-PT')}</div>
- <ul>${a.items.map(i=>`<li>${esc(i.name)}: <strong>${i.total}</strong> un. (${i.qtyPerPiece}/peça)</li>`).join('')}</ul>
+ ${a.type==='dimensional'?'<p class="alert-message"><strong>Preparar relatório dimensional para envio ao cliente.</strong></p>':`<ul>${(a.items||[]).map(i=>`<li>${esc(i.name)}: <strong>${i.total}</strong> un. (${i.qtyPerPiece}/peça)</li>`).join('')}</ul>`}
  <label class="alert-read"><input type="checkbox" class="mark-alert-read" data-id="${a.id}"> Lido</label></div>`).join(''):'<div class="no-alerts">Não existem alertas pendentes.</div>';
- document.querySelectorAll('.mark-alert-read').forEach(c=>c.onchange=()=>{let a=state.alerts.find(x=>x.id===c.dataset.id);if(a&&c.checked){a.read=true;a.readAt=new Date().toISOString();save();renderAlerts();renderAlertBadge()}});
+ document.querySelectorAll('.mark-alert-read').forEach(c=>c.onchange=()=>{let a=state.alerts.find(x=>x.id===c.dataset.id);if(a&&c.checked){a.read=true;a.readAt=new Date().toISOString();save();renderAlerts();renderAlertBadge();gantt()}});
 }
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.0',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.1',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
@@ -662,6 +709,7 @@ $('backupBtn').onclick=downloadBackup;
 $('prev').onclick=()=>{state.start=add(state.start,-state.weeksVisible*7);gantt()};
 $('next').onclick=()=>{state.start=add(state.start,state.weeksVisible*7);gantt()};
 $('today').onclick=()=>{state.start=startWeek(new Date());gantt()};
+$('partsFilter').addEventListener('input',partsTable);
 $('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
 
 tabs();

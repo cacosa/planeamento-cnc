@@ -310,3 +310,56 @@ nav #backupBtn{margin-left:auto}
   .accrow{grid-template-columns:1fr}
   nav #backupBtn{margin-left:0}
 }
+
+/* =========================================================
+   V2.1 — calendário, interrupções, CMM e manutenção
+   ========================================================= */
+:root{
+  --g1:#3b82f6;
+  --g2:#93c5fd;
+  --orange:#f59e0b;
+}
+.g1{background:var(--g1)}
+.g2{background:var(--g2)}
+.interrupted{background:var(--orange)}
+.bar.g1{background:var(--g1);color:#fff}
+.bar.g2{background:var(--g2);color:#17324d}
+.bar.interrupted{
+  background:repeating-linear-gradient(135deg,#f59e0b 0,#f59e0b 12px,#fbbf24 12px,#fbbf24 24px);
+  color:#4a2b00;
+}
+.dim-dot{
+  position:absolute;
+  left:5px;
+  top:5px;
+  width:10px;
+  height:10px;
+  min-width:10px;
+  border-radius:50%;
+  background:#d92d20;
+  border:2px solid #fff;
+  box-shadow:0 0 0 1px rgba(0,0,0,.15);
+  z-index:6;
+}
+.bar:has(.dim-dot){padding-left:20px}
+.parts-filter{max-width:460px;margin:0 0 12px}
+.parts-filter input{width:100%}
+.warning{background:#f59e0b!important;border-color:#d97706!important;color:#fff!important}
+.hdr .nonworking-date{background:#e6e8ec!important}
+.hdr .saturday-toggle::after{content:"Indisponível"}
+.hdr .saturday-toggle.sat-active::after{content:"Disponível"}
+.intervention-card{border:1px solid var(--b);border-radius:10px;padding:10px 12px;margin:8px 0;background:#fff}
+.intervention-card strong,.intervention-card small{display:block}
+.intervention-card small{margin-top:4px;color:var(--muted)}
+.dialog-pad{padding:18px}
+.intervention-form-wrap{border:1px solid var(--b);border-radius:10px;padding:12px;margin:10px 0;background:#f8fafc}
+.dimensional-alert{border-left:5px solid #d92d20}
+#calendarTable td,#calendarTable th{white-space:nowrap}
+#calendarTable td:nth-child(3),#calendarTable td:nth-child(5){white-space:normal}
+@media(max-width:700px){
+  .parts-filter{max-width:none}
+  .dim-dot{width:9px;height:9px;min-width:9px}
+}
+.job-int-row{border-left:3px solid #f59e0b;padding:6px 9px;margin:6px 0;background:#fff8e8;border-radius:4px}
+.job-int-row small{display:block;margin-top:3px;color:var(--muted)}
+#jobInterruptionsWrap{margin-top:6px}

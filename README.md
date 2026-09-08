@@ -1,15 +1,63 @@
-# Planeamento CNC V1.8 — Supabase
+# PLANEAMENTO - MAQUINAÇÃO · V2.1
 
-Esta versão mantém a interface da V1.7 e sincroniza o estado da aplicação com o Supabase.
+## Alterações principais
 
-## Antes de publicar
-1. Executar `supabase_patch_v1_8.sql` no SQL Editor do projeto Supabase.
-2. Confirmar `Success`.
-3. Substituir no GitHub os ficheiros `index.html`, `style.css`, `app.js` e `config.js`.
-4. Fazer Commit.
-5. Abrir a aplicação em casa primeiro. Na primeira abertura, se o Supabase ainda estiver vazio, a aplicação envia automaticamente os dados locais existentes deste navegador.
-6. Quando aparecer `Supabase ligado`, abrir noutro dispositivo/computador e confirmar que aparecem os mesmos dados.
+### Peças / Tempos
+- Novo filtro único por código da peça, designação ou cliente.
+- Nova opção **Requer relatório dimensional / CMM**.
+- Quando uma OF de uma peça com relatório dimensional é programada:
+  - é criado um alerta no sino;
+  - aparece um ponto vermelho persistente no primeiro segmento visível da barra;
+  - o tooltip da barra informa que o relatório dimensional é necessário;
+  - ao marcar o alerta como **Lido**, o ponto vermelho desaparece, mantendo o registo no histórico da aplicação.
 
-## Importante
-Para o teste, a aplicação continua a guardar uma cópia no localStorage como recuperação, mas a fonte partilhada é o Supabase.
-As políticas atuais são temporárias e sem login. Depois do teste deve ser adicionada autenticação.
+### Planeamento / Gantt
+- Produções programadas em azul.
+- Primeira produção da fila em azul médio e produções seguintes em azul claro.
+- Produções atrasadas continuam a vermelho e concluídas a cinzento.
+- Produções interrompidas aparecem a laranja com padrão.
+- Nova opção por produção: **Trabalhar aos sábados disponíveis**.
+- O sábado deixou de ser global para todas as produções: o Calendário define se o sábado está disponível e cada produção decide se o utiliza.
+
+### Interrupções de produção
+- Botão **Interromper produção** na edição da OF.
+- Motivos: Falta de colaborador, Avaria, Falta de material, Aguardar controlo / CMM e Outro.
+- Guarda data/hora de início, motivo e observação.
+- Botão **Retomar produção** guarda a data/hora de retoma.
+- A previsão é prolongada pelo tempo útil perdido durante a interrupção.
+- Histórico de interrupções visível na própria produção.
+- Em caso de Avaria, pode criar também um registo no histórico da máquina.
+
+### Máquinas / Recursos
+- Novos campos: Marca, Modelo, Número de série, Ano e Estado.
+- Histórico de intervenções por máquina.
+- Tipos: Avaria, Manutenção preventiva, Manutenção corretiva e Melhoria.
+- Cada intervenção pode guardar descrição, trabalho realizado, técnico/empresa, horas de paragem e observações.
+
+### Calendário de Produção
+- Novo separador **Calendário de Produção**.
+- Tipos: Feriado, Sábado, Encerramento, Férias coletivas e Outro.
+- Cada data pode ser marcada como útil/disponível ou não útil.
+- Domingo permanece sempre sem trabalho.
+- Sábados só ficam disponíveis quando registados no calendário como dia útil.
+- Sábados anteriormente ativados na V2.0 são migrados para o novo calendário como disponíveis, mas cada produção precisa da opção de sábado ativa para os usar.
+
+### Dados / Supabase
+- Continua a usar a tabela `app_state` existente.
+- **Não é necessário executar novo SQL para testar a V2.1.**
+- O snapshot passa a identificar `version: 21`.
+- Os dados existentes são normalizados sem serem apagados.
+- O botão Backup passa a identificar o ficheiro como versão 2.1.
+
+## Publicação no GitHub Pages
+Substituir os ficheiros da V2.0 pelos ficheiros desta pasta, fazer commit e aguardar a atualização do GitHub Pages.
+Depois, atualizar a página com Ctrl+F5 no computador ou fechar/reabrir a página no telemóvel.
+
+## Testes recomendados
+1. Confirmar que os dados existentes aparecem normalmente.
+2. Marcar uma peça como “Requer relatório dimensional / CMM” e programar uma OF.
+3. Confirmar ponto vermelho na barra, tooltip e alerta no sino; marcar Lido e confirmar que o ponto desaparece.
+4. Criar um sábado disponível no Calendário e comparar duas produções: uma com sábado ativo e outra sem sábado ativo.
+5. Interromper uma produção, verificar barra laranja, retomar e confirmar histórico.
+6. Abrir uma máquina e testar o histórico de intervenções.
+7. Fazer um Backup antes de usar a V2.1 em produção diária.
