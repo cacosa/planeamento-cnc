@@ -184,14 +184,50 @@ function factoryWorkingDay(d){let w=d.getDay(),e=calendarEntry(d);if(w===0)retur
 function jobWorkingDay(j,d){if(!factoryWorkingDay(d))return false;if(d.getDay()===6)return !!j?.workSaturdays;return true}
 function nextWorkingDay(d,j=null){let x=new Date(d);do{x=add(x,1)}while(j?!jobWorkingDay(j,x):!factoryWorkingDay(x));return x}
 function normalizeStartDate(d,j=null){let x=new Date(d);while(j?!jobWorkingDay(j,x):!factoryWorkingDay(x))x=add(x,1);return x}
-function interruptionLostDays(j,it,endIso=null){
+function employeeWorkIntervalsForDay(e,d){
+ if(!e)return [];
+ const day=new Date(d);day.setHours(0,0,0,0);
+ let start=tm(e.start),finish=tm(e.end);if(finish<=start)finish+=1440;
+ let intervals=[[start,finish]];
+ for(const br of (e.breaks||[])){
+   let bs=tm(br.start),be=tm(br.end);if(be<=bs)be+=1440;
+   while(bs<start){bs+=1440;be+=1440}
+   const next=[];
+   for(const [a,b] of intervals){
+     if(be<=a||bs>=b){next.push([a,b]);continue}
+     if(bs>a)next.push([a,Math.min(bs,b)]);
+     if(be<b)next.push([Math.max(be,a),b]);
+   }
+   intervals=next;
+ }
+ return intervals.filter(([a,b])=>b>a).map(([a,b])=>[new Date(day.getTime()+a*60000),new Date(day.getTime()+b*60000)]);
+}
+function jobWorkIntervalsForDay(j,d){
+ if(!jobWorkingDay(j,d))return [];
+ let all=[j.m,j.a,j.n].filter(Boolean).flatMap(id=>employeeWorkIntervalsForDay(emp(id),d)).sort((x,y)=>x[0]-y[0]);
+ if(!all.length)return [];
+ let merged=[all[0]];
+ for(const cur of all.slice(1)){
+   let last=merged[merged.length-1];
+   if(cur[0]<=last[1]){if(cur[1]>last[1])last[1]=cur[1]}else merged.push(cur);
+ }
+ return merged;
+}
+function interruptionLostHours(j,it,endIso=null){
  let a=new Date(it.startAt),b=new Date(endIso||it.resumeAt||new Date());if(!(a<b))return 0;
- let total=0,cur=new Date(a);cur.setHours(0,0,0,0);
- while(cur<b){let nxt=add(cur,1),from=Math.max(a,cur),to=Math.min(b,nxt);if(jobWorkingDay(j,cur)&&to>from)total+=(to-from)/86400000;cur=nxt}
+ let total=0,cur=new Date(a);cur.setHours(0,0,0,0);cur=add(cur,-1);
+ const limit=new Date(b);limit.setHours(0,0,0,0);
+ while(cur<=limit){
+   for(const [s,e] of jobWorkIntervalsForDay(j,cur)){
+     const from=new Date(Math.max(a,s)),to=new Date(Math.min(b,e));
+     if(to>from)total+=(to-from)/3600000;
+   }
+   cur=add(cur,1);
+ }
  return total;
 }
-function interruptionDelayDays(j){return (j.interruptions||[]).reduce((sum,it)=>sum+interruptionLostDays(j,it),0)}
-function effectiveHours(j){let cap=jobCapacityHours(j);return hrs(j)+(cap>0?interruptionDelayDays(j)*cap:0)}
+function interruptionDelayHours(j){return (j.interruptions||[]).reduce((sum,it)=>sum+interruptionLostHours(j,it),0)}
+function effectiveHours(j){return hrs(j)+interruptionDelayHours(j)}
 function activeInterruption(j){return (j.interruptions||[]).find(it=>!it.resumeAt)||null}
 
 function jobWorkSegments(j){
@@ -364,7 +400,7 @@ function gantt(){
        j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
        j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
        p?.dimensionalReport?`Relatório dimensional: necessário (${dimPending?'PENDENTE':'alerta lido'})`:'',
-       (j.interruptions||[]).length?`Interrupções: ${(j.interruptions||[]).length} · atraso acumulado ${interruptionDelayDays(j).toFixed(1)} dia(s)`:''
+       (j.interruptions||[]).length?`Interrupções: ${(j.interruptions||[]).length} · paragem acumulada ${fmtHours(interruptionDelayHours(j))}`:''
      ].filter(Boolean).join('\n');
 
      runs.forEach(run=>{
@@ -374,7 +410,7 @@ function gantt(){
        let s=Math.max(0,off),ee=Math.min(totalDays,off+width),v=ee-s;
        if(v<=0)return;
        let b=document.createElement('button');
-       b.className='bar segment '+(j.status==='Concluída'?'done':j.status==='Interrompida'?'interrupted':end(j)<new Date()?'late':idx===0?'g1':'g2')+(labelDone?' blank':'');
+       b.className='bar segment '+(j.status==='Concluída'?'done':j.status==='Interrompida'?'interrupted':end(j)<new Date()?'late':idx%2===0?'g1':'g2')+(labelDone?' blank':'');
        b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
        b.style.width=`calc((100% - 155px) * ${v/totalDays} - 3px)`;
        if(!labelDone){

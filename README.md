@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.1
+# PLANEAMENTO - MAQUINAÇÃO · V2.1.1
 
 ## Alterações principais
 
@@ -61,3 +61,11 @@ Depois, atualizar a página com Ctrl+F5 no computador ou fechar/reabrir a págin
 5. Interromper uma produção, verificar barra laranja, retomar e confirmar histórico.
 6. Abrir uma máquina e testar o histórico de intervenções.
 7. Fazer um Backup antes de usar a V2.1 em produção diária.
+
+
+## V2.1.1 — correções
+- As produções programadas alternam azul escuro / azul claro na mesma máquina.
+- O tempo útil perdido numa interrupção é somado à duração da produção no Gantt.
+- Uma interrupção de 2 h durante horário produtivo aumenta a duração planeada em 2 h.
+- Intervalos, turnos, fins de semana, feriados e sábados autorizados são respeitados no cálculo da paragem.
+- Ao aumentar a duração, a fila da mesma máquina é recalculada para evitar sobreposição.
