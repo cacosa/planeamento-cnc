@@ -363,3 +363,8 @@ nav #backupBtn{margin-left:auto}
 .job-int-row{border-left:3px solid #f59e0b;padding:6px 9px;margin:6px 0;background:#fff8e8;border-radius:4px}
 .job-int-row small{display:block;margin-top:3px;color:var(--muted)}
 #jobInterruptionsWrap{margin-top:6px}
+
+
+/* V2.1.2 — posicionamento horário no Gantt */
+.drag-time-hint{position:fixed;z-index:9999;background:#111827;color:#fff;padding:5px 8px;border-radius:6px;font-size:12px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.18)}
+.cell.drag-target{outline:2px solid #1769e0;outline-offset:-2px}

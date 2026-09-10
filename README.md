@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.1.1
+# PLANEAMENTO - MAQUINAÇÃO · V2.1.2
 
 ## Alterações principais
 
@@ -69,3 +69,16 @@ Depois, atualizar a página com Ctrl+F5 no computador ou fechar/reabrir a págin
 - Uma interrupção de 2 h durante horário produtivo aumenta a duração planeada em 2 h.
 - Intervalos, turnos, fins de semana, feriados e sábados autorizados são respeitados no cálculo da paragem.
 - Ao aumentar a duração, a fila da mesma máquina é recalculada para evitar sobreposição.
+
+
+## V2.1.2 — precisão horária e interrupção no ponto da barra
+- O Gantt continua dividido por dias, mas cada célula passa a aceitar posicionamento de hora em hora.
+- Ao arrastar uma produção dentro de um dia, a hora é calculada pela posição horizontal e encaixa à hora inteira.
+- Durante o arrasto aparece uma indicação com data e hora.
+- A produção guarda `startTime`, mantendo compatibilidade com planeamentos antigos.
+- Uma barra não pode ser largada sobre outra produção da mesma máquina; em conflito, a posição anterior é mantida.
+- O diálogo da produção passa a mostrar também a Hora de início.
+- Ao clicar numa zona concreta da barra, a aplicação memoriza a data/hora correspondente.
+- Ao escolher “Interromper produção”, essa data/hora é proposta automaticamente como início da interrupção e pode ser corrigida manualmente.
+- O prolongamento por interrupção continua a empurrar para a frente as produções seguintes, agora com precisão horária.
+- Não é necessário novo SQL; continua a usar `app_state`.

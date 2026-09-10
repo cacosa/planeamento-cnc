@@ -52,6 +52,17 @@ function pd(s){let [y,m,d]=String(s).split('-').map(Number);return new Date(y,m-
 function compactDate(d){return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`}
 function localDateTimeValue(d=new Date()){let z=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`}
 function fmtDateTime(v){if(!v)return '—';return new Date(v).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}
+function hhmmFromDate(d){return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}
+function dateAt(dateStr,timeStr='00:00'){let d=pd(dateStr),[h,m]=String(timeStr||'00:00').split(':').map(Number);d.setHours(h||0,m||0,0,0);return d}
+function setJobStartDateTime(j,d){j.start=ds(d);j.startTime=hhmmFromDate(d);return j}
+function inferJobStartTime(j){
+ const day=pd(j.start);
+ const ints=jobWorkIntervalsForDay(j,day);
+ if(ints.length)return hhmmFromDate(ints[0][0]);
+ return '07:00';
+}
+function jobStartDateTime(j){return dateAt(j.start,j.startTime||inferJobStartTime(j))}
+function snapHour(d){let x=new Date(d);x.setMinutes(0,0,0);if(d.getMinutes()>=30)x.setHours(x.getHours()+1);return x}
 function weekdayName(d){return ['domingo','segunda','terça','quarta','quinta','sexta','sábado'][d.getDay()]}
 function part(id){return state.parts.find(x=>x.id===id)}
 function op(id){return state.ops.find(x=>x.id===id)}
@@ -98,6 +109,7 @@ function normalizeState(){
    if(!e.end)e.end=d.end;
    if(!Array.isArray(e.breaks))e.breaks=structuredClone(d.breaks);
  });
+ state.jobs.forEach(j=>{if(!j.startTime)j.startTime=inferJobStartTime(j)});
 
  state.machines.forEach(m=>{
    m.group=machineGroupForCode(m.code,m.group);
@@ -120,7 +132,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:21,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
+ return {version:212,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -230,27 +242,73 @@ function interruptionDelayHours(j){return (j.interruptions||[]).reduce((sum,it)=
 function effectiveHours(j){return hrs(j)+interruptionDelayHours(j)}
 function activeInterruption(j){return (j.interruptions||[]).find(it=>!it.resumeAt)||null}
 
-function jobWorkSegments(j){
- let remaining=effectiveHours(j),cap=jobCapacityHours(j),segments=[];
- if(cap<=0)return segments;
- let cur=normalizeStartDate(pd(j.start),j),guard=0;
- while(remaining>1e-9&&guard++<1000){
-   let used=Math.min(cap,remaining);
-   segments.push({date:new Date(cur),frac:Math.min(1,used/cap)});
-   remaining-=used;
-   if(remaining>1e-9)cur=nextWorkingDay(cur,j);
+function firstJobWorkInstantAtOrAfter(j,at){
+ let probe=new Date(at),guard=0;
+ while(guard++<370){
+   let day=new Date(probe);day.setHours(0,0,0,0);
+   if(jobWorkingDay(j,day)){
+     for(const [a,b] of jobWorkIntervalsForDay(j,day)){
+       if(probe<=a)return new Date(a);
+       if(probe>a&&probe<b)return new Date(probe);
+     }
+   }
+   day=add(day,1);day.setHours(0,0,0,0);probe=day;
  }
- return segments;
+ return new Date(at);
 }
-function end(j){
- let segs=jobWorkSegments(j);
- if(!segs.length)return pd(j.start);
- let last=segs[segs.length-1];
- return new Date(last.date.getTime()+last.frac*86400000);
+function jobWorkSlices(j){
+ let remaining=effectiveHours(j),slices=[],cursor=firstJobWorkInstantAtOrAfter(j,jobStartDateTime(j)),guard=0;
+ if(remaining<=1e-9)return slices;
+ while(remaining>1e-9&&guard++<5000){
+   let day=new Date(cursor);day.setHours(0,0,0,0),worked=false;
+   if(jobWorkingDay(j,day)){
+     for(const [a,b] of jobWorkIntervalsForDay(j,day)){
+       if(b<=cursor)continue;
+       let from=new Date(Math.max(cursor,a)),available=(b-from)/3600000;
+       if(available<=0)continue;
+       let used=Math.min(remaining,available),to=new Date(from.getTime()+used*3600000);
+       slices.push({start:from,end:to,date:new Date(day)});remaining-=used;worked=true;cursor=to;
+       if(remaining<=1e-9)break;
+     }
+   }
+   if(remaining>1e-9){let next=add(day,1);next.setHours(0,0,0,0);cursor=firstJobWorkInstantAtOrAfter(j,next)}
+   else if(!worked)break;
+ }
+ return slices;
 }
-function jobLastWorkDate(j){let segs=jobWorkSegments(j);return segs.length?segs[segs.length-1].date:pd(j.start)}
-function nextStartAfterJob(j,targetJob=null){return nextWorkingDay(jobLastWorkDate(j),targetJob)}
-function dur(j){return (end(j)-pd(j.start))/86400000}
+function jobWorkSegments(j){
+ const byDay=new Map();
+ for(const sl of jobWorkSlices(j)){
+   const key=ds(sl.date),cur=byDay.get(key);
+   if(!cur)byDay.set(key,{date:new Date(sl.date),start:new Date(sl.start),end:new Date(sl.end)});
+   else{if(sl.start<cur.start)cur.start=new Date(sl.start);if(sl.end>cur.end)cur.end=new Date(sl.end)}
+ }
+ return [...byDay.values()].sort((a,b)=>a.date-b.date).map(x=>({date:x.date,start:x.start,end:x.end,startFrac:(x.start-x.date)/86400000,endFrac:(x.end-x.date)/86400000}));
+}
+function end(j){let s=jobWorkSlices(j);return s.length?new Date(s[s.length-1].end):jobStartDateTime(j)}
+function jobLastWorkDate(j){let e=end(j);e.setHours(0,0,0,0);return e}
+function nextStartAfterJob(j,targetJob=null){return firstJobWorkInstantAtOrAfter(targetJob||j,end(j))}
+function dur(j){return (end(j)-jobStartDateTime(j))/86400000}
+
+function renderedIntervals(j){return jobRuns(j).map(run=>({start:new Date(run.startDate.getTime()+run.startFrac*86400000),end:new Date(run.lastDate.getTime()+run.endFrac*86400000)}))}
+function hasMachineOverlap(testJob,ignoreId=testJob.id){
+ const a=renderedIntervals(testJob);
+ return state.jobs.some(other=>{
+   if(other.id===ignoreId||other.machine!==testJob.machine)return false;
+   const b=renderedIntervals(other);
+   return a.some(x=>b.some(y=>x.start<y.end&&y.start<x.end));
+ });
+}
+function pointerDateTimeInCell(ev,cell){
+ const r=cell.getBoundingClientRect(),ratio=Math.min(.999999,Math.max(0,(ev.clientX-r.left)/r.width));
+ let d=pd(cell.dataset.date);d.setHours(Math.min(23,Math.max(0,Math.round(ratio*24))),0,0,0);return d;
+}
+function pointerDateTimeInRow(ev,row,totalDays){
+ const rr=row.getBoundingClientRect(),machineWidth=155,content=Math.max(1,rr.width-machineWidth),x=Math.min(content-.001,Math.max(0,ev.clientX-rr.left-machineWidth)),dayFloat=x/content*totalDays,day=Math.floor(dayFloat),hour=Math.min(23,Math.max(0,Math.round((dayFloat-day)*24)));
+ let d=add(state.start,day);d.setHours(hour,0,0,0);return d;
+}
+function showDragTimeHint(ev,d){let el=document.getElementById('dragTimeHint');if(!el){el=document.createElement('div');el.id='dragTimeHint';el.className='drag-time-hint';document.body.appendChild(el)}el.textContent=`${compactDate(d)} · ${hhmmFromDate(d)}`;el.style.left=`${ev.clientX+12}px`;el.style.top=`${ev.clientY+12}px`;el.classList.remove('hidden')}
+function hideDragTimeHint(){document.getElementById('dragTimeHint')?.classList.add('hidden')}
 
 function isoWeek(d){
  const x=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
@@ -306,36 +364,32 @@ function sequenceCheck(j){
    .sort((a,b)=>pd(b.start)-pd(a.start))[0];
  if(!prevJob)return {ok:false,msg:`${curOp.op} não pode ser planeada antes de ${prevOp.op}. Não encontrei ${prevOp.op} para a OF ${j.of}.`};
  let earliest=prevJob.status==='Concluída'&&prevJob.completedDate?nextWorkingDay(pd(prevJob.completedDate),j):nextStartAfterJob(prevJob,j);
- if(pd(j.start)<earliest){
+ if(jobStartDateTime(j)<earliest){
    return {ok:false,msg:`${curOp.op} só pode iniciar depois de ${prevOp.op}. Primeira data válida: ${earliest.toLocaleDateString('pt-PT')}.`,earliest};
  }
  return {ok:true};
 }
 
-function moveJobByDrag(jobId,mid,dateStr){
- let j=state.jobs.find(x=>x.id===jobId);
- if(!j)return;
+function moveJobByDrag(jobId,mid,targetDateTime){
+ let j=state.jobs.find(x=>x.id===jobId);if(!j)return;
  if(j.status==='Concluída')return alert('Esta produção está concluída e encontra-se bloqueada.');
- let target=pd(dateStr);
+ let target=snapHour(targetDateTime);
  if(!factoryWorkingDay(target))return alert(target.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no calendário de produção.');
  if(target.getDay()===6&&!j.workSaturdays)return alert('Esta produção não está autorizada a trabalhar ao sábado. Ative “Trabalhar aos sábados disponíveis” na produção.');
  if(!canRunOnMachine(j,mid))return alert('Esta peça/operação não pode ser executada nesta máquina.');
- let test={...j,machine:mid,start:dateStr},seq=sequenceCheck(test);
+ let test={...j,machine:mid,start:ds(target),startTime:hhmmFromDate(target)},seq=sequenceCheck(test);
  if(!seq.ok)return alert(seq.msg);
- let oldMachine=j.machine;j.machine=mid;j.start=dateStr;
+ if(hasMachineOverlap(test,j.id))return alert('Período já ocupado nesta máquina. A barra não pode ficar sobre outra produção.');
+ let oldMachine=j.machine;j.machine=mid;setJobStartDateTime(j,target);
  if(oldMachine!==mid)push(oldMachine);push(mid);save();render();
 }
 
 function jobRuns(j){
- const segs=jobWorkSegments(j);
- let runs=[];
+ const segs=jobWorkSegments(j);let runs=[];
  for(const seg of segs){
    let last=runs[runs.length-1];
-   if(last&&Math.round((seg.date-last.lastDate)/86400000)===1){
-     last.days+=1;last.lastFrac=seg.frac;last.lastDate=seg.date;
-   }else{
-     runs.push({startDate:seg.date,lastDate:seg.date,days:1,lastFrac:seg.frac});
-   }
+   if(last&&Math.round((seg.date-last.lastDate)/86400000)===1){last.days+=1;last.endFrac=seg.endFrac;last.lastDate=seg.date}
+   else runs.push({startDate:seg.date,lastDate:seg.date,days:1,startFrac:seg.startFrac,endFrac:seg.endFrac});
  }
  return runs;
 }
@@ -378,9 +432,9 @@ function gantt(){
      c.className='cell'+((w===0||w===6)?' weekend':'')+(w===6&&work?' sat-active':'')+(!work?' nonworking':'');
      c.dataset.machine=m.id;c.dataset.date=ds(d);
      if(work){
-       c.addEventListener('dragover',ev=>{ev.preventDefault();c.classList.add('drag-target')});
-       c.addEventListener('dragleave',()=>c.classList.remove('drag-target'));
-       c.addEventListener('drop',ev=>{ev.preventDefault();c.classList.remove('drag-target');let id=ev.dataTransfer.getData('text/plain');if(id)moveJobByDrag(id,m.id,ds(d))});
+       c.addEventListener('dragover',ev=>{ev.preventDefault();c.classList.add('drag-target');showDragTimeHint(ev,pointerDateTimeInCell(ev,c))});
+       c.addEventListener('dragleave',()=>{c.classList.remove('drag-target');hideDragTimeHint()});
+       c.addEventListener('drop',ev=>{ev.preventDefault();c.classList.remove('drag-target');hideDragTimeHint();let id=ev.dataTransfer.getData('text/plain');if(id)moveJobByDrag(id,m.id,pointerDateTimeInCell(ev,c))});
      }
      let bt=document.createElement('button');bt.textContent='+';
      if(work)bt.onclick=()=>newJob(m.id,i);else{bt.disabled=true;bt.title=w===0?'Domingo sem trabalho':'Data não disponível — configure no Calendário de Produção'}
@@ -395,8 +449,8 @@ function gantt(){
      let tooltip=[
        `OF: ${j.of||'—'}`,`Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,
        `Quantidade: ${j.qty}`,`Tempo: ${hrs(j).toFixed(1)} h`,`Capacidade: ${fmtHours(jobCapacityHours(j))}/dia`,
-       `Operadores: ${names}`,`Início: ${pd(j.start).toLocaleDateString('pt-PT')}`,
-       `Fim previsto: ${jobLastWorkDate(j).toLocaleDateString('pt-PT')}`,
+       `Operadores: ${names}`,`Início: ${jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
+       `Fim previsto: ${end(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
        j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
        j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
        p?.dimensionalReport?`Relatório dimensional: necessário (${dimPending?'PENDENTE':'alerta lido'})`:'',
@@ -404,9 +458,9 @@ function gantt(){
      ].filter(Boolean).join('\n');
 
      runs.forEach(run=>{
-       let off=Math.round((run.startDate-state.start)/86400000);
-       let width=(run.days-1)+run.lastFrac;
-       if(off>totalDays-1||off+width<0)return;
+       let off=Math.round((run.startDate-state.start)/86400000)+run.startFrac;
+       let width=(run.days-1)+(run.endFrac-run.startFrac);
+       if(off>totalDays||off+width<0)return;
        let s=Math.max(0,off),ee=Math.min(totalDays,off+width),v=ee-s;
        if(v<=0)return;
        let b=document.createElement('button');
@@ -421,16 +475,16 @@ function gantt(){
        let locked=j.status==='Concluída';b.draggable=!locked;
        if(!locked){
          b.addEventListener('dragstart',ev=>{ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',j.id);b.classList.add('dragging')});
-         b.addEventListener('dragend',()=>b.classList.remove('dragging'));
+         b.addEventListener('dragend',()=>{b.classList.remove('dragging');hideDragTimeHint()});
        }
-       b.onclick=()=>editJobOpen(j);r.appendChild(b);
+       b.onclick=ev=>editJobOpen(j,pointerDateTimeInRow(ev,r,totalDays));r.appendChild(b);
      });
    });
    g.appendChild(r);
  });
 }
 
-let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null,editMachine=null;
+let editJob=null,jobCtx=null,editPart=null,editClient=null,editEmp=null,editMachine=null,jobClickedAt=null;
 
 function renderJobInterruptions(j){
  let arr=j?.interruptions||[];$('jobInterruptionsWrap').classList.toggle('hidden',!arr.length);$('jobInterruptions').innerHTML=arr.map(it=>`<div class="job-int-row"><strong>${esc(it.reason)}</strong>${it.detail?` · ${esc(it.detail)}`:''}<small>Início: ${fmtDateTime(it.startAt)} · ${it.resumeAt?'Retomada: '+fmtDateTime(it.resumeAt):'<strong>EM CURSO</strong>'}</small></div>`).join('');
@@ -439,25 +493,25 @@ function renderJobInterruptions(j){
 function newJob(mid,day){
  let requested=add(state.start,day);
  if(!factoryWorkingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.');
- editJob=null;jobCtx={mid,day};$('jobError').textContent='';
+ editJob=null;jobClickedAt=null;jobCtx={mid,day};$('jobError').textContent='';
  $('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${requested.toLocaleDateString('pt-PT')}`;
- fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobOF').value='';$('jobCompletedDate').value='';
+ fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobTime').value='07:00';$('jobOF').value='';$('jobCompletedDate').value='';
  $('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';
  renderJobInterruptions(null);$('jobWorkSaturdays').checked=requested.getDay()===6;$('interruptJob').classList.add('hidden');$('resumeJob').classList.add('hidden');$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
 }
-function editJobOpen(j){
- editJob=j.id;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
+function editJobOpen(j,clickedAt=null){
+ editJob=j.id;jobClickedAt=clickedAt;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
  $('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;
- fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobOF').value=j.of||'';
+ fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobTime').value=j.startTime||inferJobStartTime(j);$('jobOF').value=j.of||'';
  $('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
  $('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';
  $('status').value=j.status||'Programada';renderJobInterruptions(j);$('jobWorkSaturdays').checked=!!j.workSaturdays;$('interruptJob').classList.toggle('hidden',j.status==='Concluída'||j.status==='Interrompida');$('resumeJob').classList.toggle('hidden',j.status!=='Interrompida');$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
  let old=state.jobs.find(x=>x.id===editJob);
- let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day));
+ let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day)),chosenTime=$('jobTime').value||old?.startTime||'07:00';
  return {id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),
-   start:chosen,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
+   start:chosen,startTime:chosenTime,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
    completedDate:$('jobCompletedDate').value||null,plannedEnd:old?.plannedEnd||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[])};
 }
 function forecast(){
@@ -465,11 +519,11 @@ function forecast(){
  let j=formJob(),cap=jobCapacityHours(j);
  if(cap<=0){$('forecast').textContent=`${hrs(j).toFixed(1)} h necessárias · escolha pelo menos um operador`;return}
  let seq=sequenceCheck(j);
- let txt=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${jobLastWorkDate(j).toLocaleDateString('pt-PT')}`;
+ let txt=`${hrs(j).toFixed(1)} h necessárias · capacidade ${fmtHours(cap)}/dia · fim previsto ${end(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`;
  if(!seq.ok)txt+=` · ⚠ ${seq.msg}`;
  $('forecast').textContent=txt;
 }
-['jobOp','jobQty','jobDate','jobOF','morn','aft','night','jobWorkSaturdays'].forEach(id=>$(id).addEventListener('input',forecast));
+['jobOp','jobQty','jobDate','jobTime','jobOF','morn','aft','night','jobWorkSaturdays'].forEach(id=>$(id).addEventListener('input',forecast));
 $('status').addEventListener('change',()=>{
  let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;
  if(done&&!$('jobCompletedDate').value)$('jobCompletedDate').value=ds(new Date());
@@ -500,6 +554,7 @@ $('jobForm').onsubmit=e=>{
  if(pd(j.start).getDay()===6&&!j.workSaturdays)return $('jobError').textContent='Para iniciar ao sábado, ative “Trabalhar aos sábados disponíveis”.';
  if(!turns(j))return $('jobError').textContent='Escolha pelo menos um operador.';
  let seq=sequenceCheck(j);if(!seq.ok)return $('jobError').textContent=seq.msg;
+ if((!old||old.machine!==j.machine||old.start!==j.start||old.startTime!==j.startTime)&&hasMachineOverlap(j,j.id))return $('jobError').textContent='Período já ocupado nesta máquina. Escolha outra hora ou outro dia.';
 
  if(j.status==='Concluída'){
    if(!j.completedDate)j.completedDate=ds(new Date());
@@ -515,18 +570,16 @@ $('jobForm').onsubmit=e=>{
 };
 
 function push(mid){
- let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>pd(x.start)-pd(y.start));
+ let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>jobStartDateTime(x)-jobStartDateTime(y));
  for(let i=0;i<a.length;i++){
-   let cur=a[i],ns=normalizeStartDate(pd(cur.start),cur);
-   if(ns>pd(cur.start))cur.start=ds(ns);
+   let cur=a[i],curStart=firstJobWorkInstantAtOrAfter(cur,jobStartDateTime(cur));
+   if(curStart>jobStartDateTime(cur))setJobStartDateTime(cur,curStart);
    if(i===0)continue;
-   let prev=a[i-1],last=jobLastWorkDate(prev),curStart=pd(cur.start);
-   if(curStart<=last){
-     let next=nextWorkingDay(last,cur);
-     if(next>curStart)cur.start=ds(next);
-   }
+   let prev=a[i-1],prevEnd=end(prev),now=jobStartDateTime(cur);
+   if(now<prevEnd){let next=firstJobWorkInstantAtOrAfter(cur,prevEnd);if(next>now)setJobStartDateTime(cur,next)}
  }
 }
+
 function repushAll(){state.machines.forEach(m=>push(m.id))}
 $('delJob').onclick=()=>{
  let j=state.jobs.find(x=>x.id===editJob);
@@ -668,7 +721,7 @@ $('addIntervention').onclick=()=>{$('interventionDate').value=ds(new Date());$('
 $('cancelIntervention').onclick=()=>$('interventionFormWrap').classList.add('hidden');
 $('interventionForm').onsubmit=e=>{e.preventDefault();let m=mach(currentInterventionMachine);if(!m)return;m.interventions.push({id:uid('mi'),date:$('interventionDate').value,type:$('interventionType').value,fault:$('interventionFault').value.trim(),work:$('interventionWork').value.trim(),technician:$('interventionTechnician').value.trim(),downtime:$('interventionDowntime').value,notes:$('interventionNotes').value.trim()});save();$('interventionFormWrap').classList.add('hidden');renderInterventions();machinesTable()};
 
-function interruptJobOpen(){let j=state.jobs.find(x=>x.id===editJob);if(!j)return;$('interruptReason').value='Falta de colaborador';$('interruptOther').value='';$('interruptAt').value=localDateTimeValue();$('interruptMachineHistory').checked=false;$('interruptMachineHistoryWrap').classList.add('hidden');$('interruptDlg').showModal()}
+function interruptJobOpen(){let j=state.jobs.find(x=>x.id===editJob);if(!j)return;$('interruptReason').value='Falta de colaborador';$('interruptOther').value='';let suggested=jobClickedAt&&jobClickedAt>=jobStartDateTime(j)&&jobClickedAt<=end(j)?jobClickedAt:new Date();$('interruptAt').value=localDateTimeValue(suggested);$('interruptMachineHistory').checked=false;$('interruptMachineHistoryWrap').classList.add('hidden');$('interruptDlg').showModal()}
 $('interruptReason').onchange=()=>$('interruptMachineHistoryWrap').classList.toggle('hidden',$('interruptReason').value!=='Avaria');
 $('interruptJob').onclick=interruptJobOpen;
 $('interruptForm').onsubmit=e=>{e.preventDefault();let j=state.jobs.find(x=>x.id===editJob);if(!j)return;let reason=$('interruptReason').value,detail=$('interruptOther').value.trim();j.interruptions.push({id:uid('int'),reason,detail,startAt:new Date($('interruptAt').value).toISOString(),resumeAt:null});j.status='Interrompida';if(reason==='Avaria'&&$('interruptMachineHistory').checked){let m=mach(j.machine);m.interventions.push({id:uid('mi'),date:$('interruptAt').value.slice(0,10),type:'Avaria',fault:detail||`Avaria durante OF ${j.of||'—'}`,work:'',technician:'',downtime:'',notes:`Registo criado a partir da interrupção da OF ${j.of||'—'}`})}syncJobAlert(j);push(j.machine);save();$('interruptDlg').close();$('jobDlg').close();render()};
