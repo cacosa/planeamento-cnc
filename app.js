@@ -5,7 +5,7 @@ machines:[
 {id:'m3',code:'UMC1000-1',group:'UMC1000'},{id:'m4',code:'UMC1000-2',group:'UMC1000'},
 {id:'m5',code:'UMC750-1',group:'UMC750'},{id:'m6',code:'UMC750-2',group:'UMC750'},
 {id:'m7',code:'UMC750-3',group:'UMC750'},{id:'m8',code:'VF3',group:'VF3'},
-{id:'m9',code:'EC1600',group:'EC1600'},{id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia'}
+{id:'m9',code:'EC1600',group:'EC1600'},{id:'m-tornos-conv',code:'Tornos convencionais',group:'TORNOS_CONVENCIONAIS',type:'Torno convencional'},{id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia'}
 ],
 employees:[
 {id:'e1',name:'Sr. Silva',shift:'Manhã',start:'07:00',end:'15:00',breaks:[{start:'10:00',end:'10:10'},{start:'12:30',end:'13:00'}]},
@@ -38,8 +38,8 @@ const shiftDefaults={
  'Noite':{start:'23:00',end:'07:00',breaks:[{start:'02:00',end:'02:10'},{start:'04:30',end:'05:00'}]}
 };
 
-const MACHINE_ORDER=['EC1600','VF3','UMC750-1','UMC750-2','UMC750-3','UMC1000-1','UMC1000-2','SL30','V8300','Serralharia'];
-const COMPAT_GROUPS=['EC1600','VF3','UMC750','UMC1000','SL30','V8300','SERRALHARIA'];
+const MACHINE_ORDER=['EC1600','VF3','UMC750-1','UMC750-2','UMC750-3','UMC1000-1','UMC1000-2','SL30','V8300','Tornos convencionais','Serralharia'];
+const COMPAT_GROUPS=['EC1600','VF3','UMC750','UMC1000','SL30','V8300','TORNOS_CONVENCIONAIS','SERRALHARIA'];
 
 const $=id=>document.getElementById(id);
 const uid=p=>p+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
@@ -78,6 +78,7 @@ function machineGroupForCode(code,oldGroup){
  if(code.startsWith('UMC1000'))return 'UMC1000';
  if(code==='VF3')return 'VF3';
  if(code==='EC1600')return 'EC1600';
+ if(code.toLowerCase()==='tornos convencionais')return 'TORNOS_CONVENCIONAIS';
  if(code.toLowerCase()==='serralharia')return 'SERRALHARIA';
  return oldGroup||'OUTRO';
 }
@@ -102,6 +103,10 @@ function normalizeState(){
    if(j.plannedEnd===undefined)j.plannedEnd=null;
    if(j.workSaturdays===undefined)j.workSaturdays=false;
    if(!Array.isArray(j.interruptions))j.interruptions=[];
+   if(j.actualStartAt===undefined)j.actualStartAt=null;
+   if(j.actualEndAt===undefined)j.actualEndAt=null;
+   if(j.finalQty===undefined)j.finalQty=null;
+   if(j.rejectedQty===undefined)j.rejectedQty=0;
  });
  state.employees.forEach(e=>{
    const d=shiftDefaults[e.shift]||shiftDefaults['Manhã'];
@@ -115,12 +120,15 @@ function normalizeState(){
    m.group=machineGroupForCode(m.code,m.group);
    if(m.brand===undefined)m.brand='';if(m.model===undefined)m.model='';if(m.serial===undefined)m.serial='';if(m.year===undefined)m.year='';
    if(!Array.isArray(m.interventions))m.interventions=[];if(m.condition===undefined)m.condition=m.active===false?'Inativa':'Ativa';
-   if(m.type===undefined)m.type=m.code.toLowerCase()==='serralharia'?'Serralharia':'CNC';
+   if(m.type===undefined)m.type=m.code.toLowerCase()==='serralharia'?'Serralharia':m.code.toLowerCase()==='tornos convencionais'?'Torno convencional':'CNC';
    if(m.active===undefined)m.active=true;
    m.order=machineOrder(m);
  });
+ if(!state.machines.some(m=>m.code.toLowerCase()==='tornos convencionais')){
+   state.machines.push({id:'m-tornos-conv',code:'Tornos convencionais',group:'TORNOS_CONVENCIONAIS',type:'Torno convencional',active:true,order:9});
+ }
  if(!state.machines.some(m=>m.code.toLowerCase()==='serralharia')){
-   state.machines.push({id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia',active:true,order:9});
+   state.machines.push({id:'m-serralharia',code:'Serralharia',group:'SERRALHARIA',type:'Serralharia',active:true,order:10});
  }
  state.ops.forEach(o=>{
    let gs=Array.isArray(o.groups)?o.groups:[];
@@ -132,7 +140,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:212,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
+ return {version:220,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -217,6 +225,10 @@ function employeeWorkIntervalsForDay(e,d){
 function jobWorkIntervalsForDay(j,d){
  if(!jobWorkingDay(j,d))return [];
  let all=[j.m,j.a,j.n].filter(Boolean).flatMap(id=>employeeWorkIntervalsForDay(emp(id),d)).sort((x,y)=>x[0]-y[0]);
+ if(!all.length)return [];
+ // Se o turno atravessa a meia-noite, não deixa a barra entrar num dia que não é produtivo para esta OF.
+ const nextDay=add(new Date(d),1);nextDay.setHours(0,0,0,0);
+ if(!jobWorkingDay(j,nextDay))all=all.map(([a,b])=>[a,new Date(Math.min(b,nextDay))]).filter(([a,b])=>b>a);
  if(!all.length)return [];
  let merged=[all[0]];
  for(const cur of all.slice(1)){
@@ -327,7 +339,7 @@ function tabs(){
 }
 
 function render(){
- gantt();partsTable();clientsTable();machinesTable();peopleTable();calendarTable();fillPeople();renderAlertBadge();
+ syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();calendarTable();fillPeople();renderAlertBadge();
 }
 
 function canRunOnMachine(job,mid){let o=op(job.op),m=mach(mid);return !!(o&&m&&o.groups.includes(m.group))}
@@ -363,9 +375,9 @@ function sequenceCheck(j){
    .filter(x=>x.id!==j.id&&x.of===j.of&&x.op===prevOp.id)
    .sort((a,b)=>pd(b.start)-pd(a.start))[0];
  if(!prevJob)return {ok:false,msg:`${curOp.op} não pode ser planeada antes de ${prevOp.op}. Não encontrei ${prevOp.op} para a OF ${j.of}.`};
- let earliest=prevJob.status==='Concluída'&&prevJob.completedDate?nextWorkingDay(pd(prevJob.completedDate),j):nextStartAfterJob(prevJob,j);
+ let prevStart=prevJob.actualStartAt?new Date(prevJob.actualStartAt):jobStartDateTime(prevJob),earliest=new Date(prevStart.getTime()+60*60000);
  if(jobStartDateTime(j)<earliest){
-   return {ok:false,msg:`${curOp.op} só pode iniciar depois de ${prevOp.op}. Primeira data válida: ${earliest.toLocaleDateString('pt-PT')}.`,earliest};
+   return {ok:false,msg:`${curOp.op} só pode iniciar 1 hora após o início de ${prevOp.op}. Primeira hora válida: ${earliest.toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}.`,earliest};
  }
  return {ok:true};
 }
@@ -449,9 +461,11 @@ function gantt(){
      let tooltip=[
        `OF: ${j.of||'—'}`,`Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,
        `Quantidade: ${j.qty}`,`Tempo: ${hrs(j).toFixed(1)} h`,`Capacidade: ${fmtHours(jobCapacityHours(j))}/dia`,
-       `Operadores: ${names}`,`Início: ${jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
+       `Operadores: ${names}`,`Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
+       j.actualStartAt?`Início real: ${fmtDateTime(j.actualStartAt)}`:'Início real: ainda não confirmado',
        `Fim previsto: ${end(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
-       j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
+       j.actualEndAt?`Fim real: ${fmtDateTime(j.actualEndAt)}`:j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
+       j.status==='Concluída'?`Quantidade final: ${j.finalQty??j.qty}${j.rejectedQty?` · rejeitada: ${j.rejectedQty}`:''}`:'',
        j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
        p?.dimensionalReport?`Relatório dimensional: necessário (${dimPending?'PENDENTE':'alerta lido'})`:'',
        (j.interruptions||[]).length?`Interrupções: ${(j.interruptions||[]).length} · paragem acumulada ${fmtHours(interruptionDelayHours(j))}`:''
@@ -495,24 +509,28 @@ function newJob(mid,day){
  if(!factoryWorkingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.');
  editJob=null;jobClickedAt=null;jobCtx={mid,day};$('jobError').textContent='';
  $('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${requested.toLocaleDateString('pt-PT')}`;
- fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobTime').value='07:00';$('jobOF').value='';$('jobCompletedDate').value='';
+ fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobTime').value='07:00';$('jobOF').value='';
+ $('jobCompletedAt').value='';$('jobFinalQty').value='';$('jobRejectedQty').value=0;
  $('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';
- renderJobInterruptions(null);$('jobWorkSaturdays').checked=requested.getDay()===6;$('interruptJob').classList.add('hidden');$('resumeJob').classList.add('hidden');$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
+ renderJobInterruptions(null);$('jobWorkSaturdays').checked=requested.getDay()===6;$('startJob').classList.add('hidden');$('interruptJob').classList.add('hidden');$('resumeJob').classList.add('hidden');$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
 }
 function editJobOpen(j,clickedAt=null){
  editJob=j.id;jobClickedAt=clickedAt;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
  $('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;
  fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobTime').value=j.startTime||inferJobStartTime(j);$('jobOF').value=j.of||'';
- $('jobCompletedDate').value=j.completedDate||'';$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
+ $('jobCompletedAt').value=j.actualEndAt?localDateTimeValue(new Date(j.actualEndAt)):'';$('jobFinalQty').value=j.finalQty??'';$('jobRejectedQty').value=j.rejectedQty??0;$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
  $('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';
- $('status').value=j.status||'Programada';renderJobInterruptions(j);$('jobWorkSaturdays').checked=!!j.workSaturdays;$('interruptJob').classList.toggle('hidden',j.status==='Concluída'||j.status==='Interrompida');$('resumeJob').classList.toggle('hidden',j.status!=='Interrompida');$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
+ $('status').value=j.status||'Programada';renderJobInterruptions(j);$('jobWorkSaturdays').checked=!!j.workSaturdays;
+ $('startJob').classList.toggle('hidden',!!j.actualStartAt||j.status==='Concluída'||j.status==='Interrompida');
+ $('interruptJob').classList.toggle('hidden',j.status==='Concluída'||j.status==='Interrompida');$('resumeJob').classList.toggle('hidden',j.status!=='Interrompida');$('delJob').classList.remove('hidden');forecast();$('jobDlg').showModal();
 }
 function formJob(){
  let old=state.jobs.find(x=>x.id===editJob);
  let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day)),chosenTime=$('jobTime').value||old?.startTime||'07:00';
  return {id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),
    start:chosen,startTime:chosenTime,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
-   completedDate:$('jobCompletedDate').value||null,plannedEnd:old?.plannedEnd||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[])};
+   completedDate:old?.completedDate||null,plannedEnd:old?.plannedEnd||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[]),
+   actualStartAt:old?.actualStartAt||null,actualEndAt:old?.actualEndAt||null,finalQty:old?.finalQty??null,rejectedQty:old?.rejectedQty??0};
 }
 function forecast(){
  if(!$('jobOp').value){$('forecast').textContent='Sem operação compatível';return}
@@ -525,13 +543,41 @@ function forecast(){
 }
 ['jobOp','jobQty','jobDate','jobTime','jobOF','morn','aft','night','jobWorkSaturdays'].forEach(id=>$(id).addEventListener('input',forecast));
 $('status').addEventListener('change',()=>{
- let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;
- if(done&&!$('jobCompletedDate').value)$('jobCompletedDate').value=ds(new Date());
- if(!done)$('jobCompletedDate').value='';forecast();
+ let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;if(done)$('startJob').classList.add('hidden');
+ if(done){if(!$('jobCompletedAt').value)$('jobCompletedAt').value=localDateTimeValue(new Date());if($('jobFinalQty').value==='')$('jobFinalQty').value=$('jobQty').value}
+ forecast();
 });
 
+function startProductionOpen(){
+ let j=state.jobs.find(x=>x.id===editJob);if(!j)return;
+ $('plannedStartView').value=jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'});
+ $('actualStartAt').value=localDateTimeValue(new Date());
+ $('startJobDlg').showModal();
+}
+$('startJob').onclick=startProductionOpen;
+$('startJobForm').onsubmit=e=>{
+ e.preventDefault();let j=state.jobs.find(x=>x.id===editJob);if(!j)return;
+ let v=$('actualStartAt').value;if(!v)return;
+ j.actualStartAt=new Date(v).toISOString();if(j.status==='Programada')j.status='Em produção';
+ syncStartAlertForJob(j);save();$('startJobDlg').close();$('jobDlg').close();render();
+};
+
+function syncStartAlertForJob(j){
+ const now=new Date(),planned=jobStartDateTime(j),needed=!j.actualStartAt&&j.status==='Programada'&&now>=planned;
+ let existing=state.alerts.find(a=>a.jobId===j.id&&a.type==='start_unconfirmed'&&!a.archived),o=op(j.op),p=part(o?.part);
+ if(!p)return false;
+ if(!needed){if(existing&&!existing.closed){existing.closed=true;existing.updatedAt=now.toISOString();return true}return false}
+ const payload={of:j.of,partCode:p.code,partDesc:p.desc,qty:j.qty,start:j.start,startTime:j.startTime||inferJobStartTime(j),machine:mach(j.machine)?.code||'—'};
+ const signature=JSON.stringify(payload);
+ if(!existing){state.alerts.push({id:uid('al'),type:'start_unconfirmed',jobId:j.id,...payload,signature,read:false,closed:false,createdAt:now.toISOString(),updatedAt:now.toISOString()});return true}
+ let changed=existing.signature!==signature||existing.closed;Object.assign(existing,payload,{signature,closed:false,updatedAt:now.toISOString()});if(changed)existing.read=false;return changed;
+}
+function syncStartAlerts(){
+ let changed=false;state.jobs.forEach(j=>{if(syncStartAlertForJob(j))changed=true});if(changed)save();
+}
+
 function syncJobAlert(j){
- let o=op(j.op),p=part(o?.part);if(!p)return;
+ syncStartAlertForJob(j);let o=op(j.op),p=part(o?.part);if(!p)return;
  const now=new Date().toISOString();
  function upsert(type,payload,needed){
    let existing=state.alerts.find(a=>a.jobId===j.id&&a.type===type&&!a.archived);
@@ -557,11 +603,17 @@ $('jobForm').onsubmit=e=>{
  if((!old||old.machine!==j.machine||old.start!==j.start||old.startTime!==j.startTime)&&hasMachineOverlap(j,j.id))return $('jobError').textContent='Período já ocupado nesta máquina. Escolha outra hora ou outro dia.';
 
  if(j.status==='Concluída'){
-   if(!j.completedDate)j.completedDate=ds(new Date());
+   const finalQty=Math.max(0,Math.floor(+$('jobFinalQty').value));
+   if(!Number.isFinite(finalQty))return $('jobError').textContent='Indique a quantidade final produzida.';
+   if($('jobFinalQty').value==='')return $('jobError').textContent='Indique a quantidade final produzida.';
+   const endValue=$('jobCompletedAt').value||localDateTimeValue(new Date());
+   j.actualEndAt=new Date(endValue).toISOString();j.completedDate=ds(new Date(j.actualEndAt));j.finalQty=finalQty;j.rejectedQty=Math.max(0,Math.floor(+$('jobRejectedQty').value||0));
+   if(!j.actualStartAt)j.actualStartAt=jobStartDateTime(j).toISOString();
    if(!j.plannedEnd)j.plannedEnd=ds(jobLastWorkDate({...j,status:'Programada'}));
  }else{
-   j.completedDate=null;j.plannedEnd=null;
+   j.completedDate=null;j.actualEndAt=null;j.finalQty=null;j.rejectedQty=0;j.plannedEnd=null;
  }
+ if(j.status==='Em produção'&&!j.actualStartAt)j.actualStartAt=new Date().toISOString();
  let oldMachine=old?.machine,i=state.jobs.findIndex(x=>x.id===j.id);
  if(i>=0)state.jobs[i]=j;else state.jobs.push(j);
  syncJobAlert(j);
@@ -601,7 +653,7 @@ function opRow(o=null){
  <label>Setup h<input class="os" type="number" min="0" step="0.1" value="${o.setup}"></label>
  <button type="button" class="danger ro">Remover</button>`;
  let c=r.querySelector('.checks');
- compatibilityGroups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${g}" ${o.groups.includes(g)?'checked':''}> ${g==='SERRALHARIA'?'Serralharia':g}</label>`);
+ compatibilityGroups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${g}" ${o.groups.includes(g)?'checked':''}> ${g==='SERRALHARIA'?'Serralharia':g==='TORNOS_CONVENCIONAIS'?'Tornos convencionais':g}</label>`);
  r.querySelector('.ro').onclick=()=>r.remove();$('ops').appendChild(r);
 }
 function accessoryRow(a={id:'',name:'',qty:1}){
@@ -616,7 +668,7 @@ function partsTable(){
  $('partsTable').innerHTML=`<table><thead><tr><th>Código</th><th>Descrição</th><th>Cliente</th><th>Operações</th><th>Acessórios</th><th>Relatório dimensional</th><th></th></tr></thead>
  <tbody>${list.slice().sort((a,b)=>a.code.localeCompare(b.code)).map(p=>`<tr>
  <td><strong>${esc(p.code)}</strong></td><td>${esc(p.desc)}</td><td>${esc(cname(p.client))}</td>
- <td>${state.ops.filter(o=>o.part===p.id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).map(o=>`${esc(o.op)} · ${o.min} min · ${o.groups.map(g=>g==='SERRALHARIA'?'Serralharia':g).join(', ')}`).join('<br>')}</td>
+ <td>${state.ops.filter(o=>o.part===p.id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).map(o=>`${esc(o.op)} · ${o.min} min · ${o.groups.map(g=>g==='SERRALHARIA'?'Serralharia':g==='TORNOS_CONVENCIONAIS'?'Tornos convencionais':g).join(', ')}`).join('<br>')}</td>
  <td>${(p.accessories||[]).map(a=>`${esc(a.name)} · ${a.qty}/pç`).join('<br>')||'—'}</td><td>${p.dimensionalReport?'Sim':'—'}</td>
  <td><button class="edit ep" data-id="${p.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
  document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id));
@@ -660,9 +712,12 @@ $('partForm').onsubmit=e=>{
  syncAlertsForPart(pid);save();$('partDlg').close();render();
 };
 $('delPart').onclick=()=>{
- let ids=state.ops.filter(o=>o.part===editPart).map(o=>o.id);
- if(state.jobs.some(j=>ids.includes(j.op)))return $('perror').textContent='Esta peça tem histórico e não pode ser eliminada.';
- state.ops=state.ops.filter(o=>o.part!==editPart);state.parts=state.parts.filter(p=>p.id!==editPart);save();$('partDlg').close();render();
+ let ids=state.ops.filter(o=>o.part===editPart).map(o=>o.id),jobs=state.jobs.filter(j=>ids.includes(j.op)),p=part(editPart);
+ let msg=jobs.length?`A peça ${p?.code||''} tem ${jobs.length} produção(ões) associada(s). Ao eliminar, essas programações também serão eliminadas. Tem a certeza?`:`Eliminar a peça ${p?.code||''}?`;
+ if(!confirm(msg))return;
+ let affected=[...new Set(jobs.map(j=>j.machine))],jobIds=new Set(jobs.map(j=>j.id));
+ state.alerts.forEach(a=>{if(jobIds.has(a.jobId))a.archived=true});state.jobs=state.jobs.filter(j=>!jobIds.has(j.id));
+ state.ops=state.ops.filter(o=>o.part!==editPart);state.parts=state.parts.filter(p=>p.id!==editPart);affected.forEach(push);save();$('partDlg').close();render();
 };
 
 function clientsTable(){
@@ -725,7 +780,7 @@ function interruptJobOpen(){let j=state.jobs.find(x=>x.id===editJob);if(!j)retur
 $('interruptReason').onchange=()=>$('interruptMachineHistoryWrap').classList.toggle('hidden',$('interruptReason').value!=='Avaria');
 $('interruptJob').onclick=interruptJobOpen;
 $('interruptForm').onsubmit=e=>{e.preventDefault();let j=state.jobs.find(x=>x.id===editJob);if(!j)return;let reason=$('interruptReason').value,detail=$('interruptOther').value.trim();j.interruptions.push({id:uid('int'),reason,detail,startAt:new Date($('interruptAt').value).toISOString(),resumeAt:null});j.status='Interrompida';if(reason==='Avaria'&&$('interruptMachineHistory').checked){let m=mach(j.machine);m.interventions.push({id:uid('mi'),date:$('interruptAt').value.slice(0,10),type:'Avaria',fault:detail||`Avaria durante OF ${j.of||'—'}`,work:'',technician:'',downtime:'',notes:`Registo criado a partir da interrupção da OF ${j.of||'—'}`})}syncJobAlert(j);push(j.machine);save();$('interruptDlg').close();$('jobDlg').close();render()};
-$('resumeJob').onclick=()=>{let j=state.jobs.find(x=>x.id===editJob),it=activeInterruption(j);if(!it)return;it.resumeAt=new Date().toISOString();j.status='Programada';syncJobAlert(j);push(j.machine);save();$('jobDlg').close();render()};
+$('resumeJob').onclick=()=>{let j=state.jobs.find(x=>x.id===editJob),it=activeInterruption(j);if(!it)return;it.resumeAt=new Date().toISOString();j.status=j.actualStartAt?'Em produção':'Programada';syncJobAlert(j);push(j.machine);save();$('jobDlg').close();render()};
 
 function peopleTable(){
  $('peopleTable').innerHTML=`<table><thead><tr><th>Colaborador</th><th>Turno</th><th>Horário</th><th>Intervalos</th><th>Horas líquidas</th><th></th></tr></thead><tbody>${state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.shift)}</td><td>${esc(e.start)}–${esc(e.end)}</td><td>${(e.breaks||[]).map(b=>`${esc(b.start)}–${esc(b.end)}`).join('<br>')||'—'}</td><td><strong>${fmtHours(netHours(e))}</strong></td><td><button class="edit ee" data-id="${e.id}">Editar</button></td></tr>`).join('')}</tbody></table>`;
@@ -751,20 +806,19 @@ $('delEmp').onclick=()=>{if(state.jobs.some(j=>[j.m,j.a,j.n].includes(editEmp)))
 
 function jobInfo(j){
  let o=op(j.op),p=part(o?.part),m=mach(j.machine);
- return {of:j.of||'—',part:p?.code||'—',desc:p?.desc||'—',op:o?.op||'—',machine:m?.code||'—',qty:j.qty,start:j.start,planned:j.plannedEnd||ds(jobLastWorkDate(j)),actual:j.completedDate||'',status:j.status};
+ return {of:j.of||'—',part:p?.code||'—',desc:p?.desc||'—',op:o?.op||'—',machine:m?.code||'—',qty:j.qty,finalQty:j.finalQty,start:j.start,startTime:j.startTime||'',actualStart:j.actualStartAt||'',planned:j.plannedEnd||ds(jobLastWorkDate(j)),actualDate:j.completedDate||'',actualEnd:j.actualEndAt||'',status:j.status};
 }
 function completeFromSearch(id){
  let j=state.jobs.find(x=>x.id===id);if(!j||j.status==='Concluída')return;
- if(!confirm(`Marcar a OF ${j.of||'—'} como concluída?`)){renderSearch();return}
- j.plannedEnd=j.plannedEnd||ds(jobLastWorkDate(j));j.status='Concluída';j.completedDate=ds(new Date());syncJobAlert(j);save();render();renderSearch();
+ $('searchDlg').close();editJobOpen(j);$('status').value='Concluída';$('startJob').classList.add('hidden');$('completedDateWrap').classList.remove('hidden');$('jobCompletedAt').value=localDateTimeValue(new Date());$('jobFinalQty').value=j.finalQty??j.qty;$('jobRejectedQty').value=j.rejectedQty??0;$('jobError').textContent='Confirme a quantidade final produzida antes de guardar.';
 }
 function renderSearch(){
  let qOF=$('searchOF').value.trim().toLowerCase(),qPart=$('searchPart').value.trim();
  let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>(!qOF||String(x.info.of).toLowerCase().includes(qOF))&&(!qPart||String(x.info.part).includes(qPart))).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
  $('searchSummary').textContent=rows.length?`${rows.length} registo(s) encontrado(s)`:'Nenhum registo encontrado';
- $('searchResults').innerHTML=rows.length?`<table class="search-table"><thead><tr><th>OF</th><th>Peça</th><th>Nome</th><th>OP</th><th>Máquina</th><th>Qtd.</th><th>Início</th><th>Fim previsto</th><th>Fim real</th><th>Estado</th><th>Fim produção</th></tr></thead>
- <tbody>${rows.map(x=>`<tr><td><strong>${esc(x.info.of)}</strong></td><td>${esc(x.info.part)}</td><td>${esc(x.info.desc)}</td><td>${esc(x.info.op)}</td><td>${esc(x.info.machine)}</td><td>${x.info.qty}</td>
- <td>${pd(x.info.start).toLocaleDateString('pt-PT')}</td><td>${pd(x.info.planned).toLocaleDateString('pt-PT')}</td><td>${x.info.actual?pd(x.info.actual).toLocaleDateString('pt-PT'):'—'}</td>
+ $('searchResults').innerHTML=rows.length?`<table class="search-table"><thead><tr><th>OF</th><th>Peça</th><th>Nome</th><th>OP</th><th>Máquina</th><th>Qtd. prog.</th><th>Qtd. final</th><th>Início previsto</th><th>Início real</th><th>Fim previsto</th><th>Fim real</th><th>Estado</th><th>Fim produção</th></tr></thead>
+ <tbody>${rows.map(x=>`<tr><td><strong>${esc(x.info.of)}</strong></td><td>${esc(x.info.part)}</td><td>${esc(x.info.desc)}</td><td>${esc(x.info.op)}</td><td>${esc(x.info.machine)}</td><td>${x.info.qty}</td><td>${x.info.finalQty??'—'}</td>
+ <td>${pd(x.info.start).toLocaleDateString('pt-PT')} ${esc(x.info.startTime)}</td><td>${x.info.actualStart?fmtDateTime(x.info.actualStart):'—'}</td><td>${pd(x.info.planned).toLocaleDateString('pt-PT')}</td><td>${x.info.actualEnd?fmtDateTime(x.info.actualEnd):x.info.actualDate?pd(x.info.actualDate).toLocaleDateString('pt-PT'):'—'}</td>
  <td><span class="status-pill ${x.info.status==='Concluída'?'status-done':'status-planned'}">${esc(x.info.status)}</span></td>
  <td class="finish-check"><input class="finish-production" data-id="${x.j.id}" type="checkbox" ${x.info.status==='Concluída'?'checked disabled':''} title="${x.info.status==='Concluída'?'Para reabrir, edite a produção.':'Marcar como concluída'}"></td></tr>`).join('')}</tbody></table>`:'';
  document.querySelectorAll('.finish-production:not(:disabled)').forEach(c=>c.onchange=()=>{if(c.checked)completeFromSearch(c.dataset.id)});
@@ -778,17 +832,19 @@ function renderAlertBadge(){
  let n=pendingAlerts().length;$('alertBadge').textContent=n;$('alertBadge').classList.toggle('hidden',!n);
 }
 function renderAlerts(){
- let arr=pendingAlerts().sort((a,b)=>String(a.start).localeCompare(String(b.start)));
- $('alertsList').innerHTML=arr.length?arr.map(a=>`<div class="alert-card ${a.type==='dimensional'?'dimensional-alert':''}"><h4>${a.type==='dimensional'?'Relatório dimensional / CMM':'Acessórios'} · OF ${esc(a.of||'—')} — ${esc(a.partCode)} — ${esc(a.partDesc)}</h4>
- <div>Produção: <strong>${a.qty} peças</strong> · início ${pd(a.start).toLocaleDateString('pt-PT')}</div>
- ${a.type==='dimensional'?'<p class="alert-message"><strong>Preparar relatório dimensional para envio ao cliente.</strong></p>':`<ul>${(a.items||[]).map(i=>`<li>${esc(i.name)}: <strong>${i.total}</strong> un. (${i.qtyPerPiece}/peça)</li>`).join('')}</ul>`}
- <label class="alert-read"><input type="checkbox" class="mark-alert-read" data-id="${a.id}"> Lido</label></div>`).join(''):'<div class="no-alerts">Não existem alertas pendentes.</div>';
+ syncStartAlerts();let arr=pendingAlerts().sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+ $('alertsList').innerHTML=arr.length?arr.map(a=>{
+   let title=a.type==='dimensional'?'Relatório dimensional / CMM':a.type==='start_unconfirmed'?'Início de produção não confirmado':'Acessórios';
+   let cls=a.type==='dimensional'?'dimensional-alert':a.type==='start_unconfirmed'?'start-alert':'';
+   let detail=a.type==='dimensional'?'<p class="alert-message"><strong>Preparar relatório dimensional para envio ao cliente.</strong></p>':a.type==='start_unconfirmed'?`<p class="alert-message"><strong>A produção já devia ter iniciado.</strong> Previsto: ${esc(a.startTime||'')} · ${esc(a.machine||'')}</p>`:`<ul>${(a.items||[]).map(i=>`<li>${esc(i.name)}: <strong>${i.total}</strong> un. (${i.qtyPerPiece}/peça)</li>`).join('')}</ul>`;
+   return `<div class="alert-card ${cls}"><h4>${title} · OF ${esc(a.of||'—')} — ${esc(a.partCode)} — ${esc(a.partDesc)}</h4><div>Produção: <strong>${a.qty} peças</strong> · início ${pd(a.start).toLocaleDateString('pt-PT')}</div>${detail}<label class="alert-read"><input type="checkbox" class="mark-alert-read" data-id="${a.id}"> Lido</label></div>`;
+ }).join(''):'<div class="no-alerts">Não existem alertas pendentes.</div>';
  document.querySelectorAll('.mark-alert-read').forEach(c=>c.onchange=()=>{let a=state.alerts.find(x=>x.id===c.dataset.id);if(a&&c.checked){a.read=true;a.readAt=new Date().toISOString();save();renderAlerts();renderAlertBadge();gantt()}});
 }
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.1',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);

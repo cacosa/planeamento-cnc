@@ -37,7 +37,7 @@
     <div class="row">
       <div>
         <h2 id="period"></h2>
-        <p>Clique numa célula para iniciar produção; clique numa barra para editar. Pode arrastar uma programação para outro dia. Domingo não trabalha. Sábados e datas especiais são definidos no Calendário de Produção; cada produção decide se usa os sábados disponíveis.</p>
+        <p>Clique numa célula para programar uma produção; clique numa barra para editar. Pode arrastar uma programação para outro dia. Domingo não trabalha. Sábados e datas especiais são definidos no Calendário de Produção; cada produção decide se usa os sábados disponíveis.</p>
       </div>
       <div>
         <label class="weeks-select">Mostrar
@@ -101,7 +101,7 @@
   </section>
 </main>
 
-<footer>FABCAST · Planeamento - Maquinação · Versão 2.1.2</footer>
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.2</footer>
 
 <dialog id="jobDlg">
 <form id="jobForm">
@@ -118,15 +118,20 @@
     <label>Operador — manhã<select id="morn"></select></label>
     <label>Operador — tarde<select id="aft"></select></label>
     <label>Operador — noite<select id="night"></select></label>
-    <label>Estado<select id="status"><option>Programada</option><option disabled>Interrompida</option><option>Concluída</option></select></label>
+    <label>Estado<select id="status"><option>Programada</option><option>Em produção</option><option disabled>Interrompida</option><option>Concluída</option></select></label>
     <label class="checkline"><input id="jobWorkSaturdays" type="checkbox"> Trabalhar aos sábados disponíveis</label>
-    <label id="completedDateWrap" class="hidden">Data de conclusão<input id="jobCompletedDate" type="date"></label>
+    <div id="completedDateWrap" class="full hidden completion-grid">
+      <label>Fim real<input id="jobCompletedAt" type="datetime-local"></label>
+      <label>Quantidade final produzida<input id="jobFinalQty" type="number" min="0" step="1"></label>
+      <label>Quantidade rejeitada / sucata<input id="jobRejectedQty" type="number" min="0" step="1" value="0"></label>
+    </div>
     <div class="forecast full"><small>Previsão</small><strong id="forecast"></strong></div>
     <div id="jobInterruptionsWrap" class="full hidden"><h4>Histórico de interrupções</h4><div id="jobInterruptions"></div></div>
   </div>
   <p id="jobError" class="error"></p>
   <div class="actions">
     <button type="button" id="delJob" class="danger hidden">Eliminar</button>
+    <button type="button" id="startJob" class="primary hidden">Iniciar produção</button>
     <button type="button" id="interruptJob" class="warning hidden">Interromper produção</button>
     <button type="button" id="resumeJob" class="primary hidden">Retomar produção</button><span></span>
     <button type="button" class="close" data-d="jobDlg">Cancelar</button>
@@ -178,11 +183,11 @@
   <div class="row"><h3 id="machineTitle"></h3><button type="button" class="close" data-d="machineDlg">✕</button></div>
   <div class="grid">
     <label>Código / Nome<input id="machineCode" required></label>
-    <label>Tipo<select id="machineType"><option>CNC</option><option>Serralharia</option><option>Outro</option></select></label>
+    <label>Tipo<select id="machineType"><option>CNC</option><option>Torno convencional</option><option>Serralharia</option><option>Outro</option></select></label>
     <label>Grupo de compatibilidade
       <select id="machineGroup">
         <option>EC1600</option><option>VF3</option><option>UMC750</option><option>UMC1000</option>
-        <option>SL30</option><option>V8300</option><option>SERRALHARIA</option><option>OUTRO</option>
+        <option>SL30</option><option>V8300</option><option>TORNOS_CONVENCIONAIS</option><option>SERRALHARIA</option><option>OUTRO</option>
       </select>
     </label>
     <label>Marca<input id="machineBrand" placeholder="Ex.: Haas"></label>
@@ -227,7 +232,7 @@
 
 <dialog id="searchDlg" class="search-dialog">
   <div class="row">
-    <div><h3>Pesquisa de produção</h3><p>Pesquise por OF ou código da peça e conclua uma produção diretamente.</p></div>
+    <div><h3>Pesquisa de produção</h3><p>Pesquise por OF ou código da peça; ao concluir, confirme a quantidade final produzida.</p></div>
     <button type="button" class="close" data-d="searchDlg">✕</button>
   </div>
   <div class="search-controls">
@@ -241,7 +246,7 @@
 
 <dialog id="alertsDlg" class="alerts-dialog">
   <div class="row">
-    <div><h3>Alertas de preparação</h3><p>Acessórios e relatórios dimensionais/CMM para produções programadas.</p></div>
+    <div><h3>Alertas de preparação</h3><p>Acessórios, relatórios dimensionais/CMM e inícios de produção por confirmar.</p></div>
     <button type="button" class="close" data-d="alertsDlg">✕</button>
   </div>
   <div id="alertsList"></div>
@@ -282,6 +287,17 @@
     </div>
     <div id="interventionsList"></div>
   </div>
+</dialog>
+
+<dialog id="startJobDlg">
+<form id="startJobForm">
+  <div class="row"><div><h3>Iniciar produção</h3><p>Confirme ou corrija a data/hora real de início.</p></div><button type="button" class="close" data-d="startJobDlg">✕</button></div>
+  <div class="grid">
+    <label>Início previsto<input id="plannedStartView" type="text" disabled></label>
+    <label>Início real<input id="actualStartAt" type="datetime-local" required></label>
+  </div>
+  <div class="actions"><span></span><button type="button" class="close" data-d="startJobDlg">Cancelar</button><button class="primary">Confirmar início</button></div>
+</form>
 </dialog>
 
 <dialog id="interruptDlg">
