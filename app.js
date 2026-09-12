@@ -635,8 +635,19 @@ function push(mid){
 function repushAll(){state.machines.forEach(m=>push(m.id))}
 $('delJob').onclick=()=>{
  let j=state.jobs.find(x=>x.id===editJob);
- if(j?.status==='Concluída')return alert('Uma produção concluída não deve ser eliminada. Reabra primeiro se precisar corrigir.');
- state.jobs=state.jobs.filter(j=>j.id!==editJob);
+ if(!j)return;
+ if(j.status==='Concluída')return alert('Uma produção concluída não deve ser eliminada. Reabra primeiro se precisar corrigir.');
+ let o=op(j.op),p=part(o?.part),m=mach(j.machine);
+ let resumo=[
+   j.of?`OF ${j.of}`:'OF sem número',
+   p?`${p.code||''}${p.name?' - '+p.name:''}`:'Peça não identificada',
+   o?.op||'Operação',
+   m?.code||'Máquina',
+   `${j.qty} un.`
+ ].join(' · ');
+ let msg=`Tem a certeza que pretende eliminar esta produção do planeamento?\n\n${resumo}\n\nEsta ação remove a barra do Gantt e não pode ser anulada automaticamente.`;
+ if(!confirm(msg))return;
+ state.jobs=state.jobs.filter(x=>x.id!==editJob);
  state.alerts.forEach(a=>{if(a.jobId===editJob)a.archived=true});
  save();$('jobDlg').close();render();
 };

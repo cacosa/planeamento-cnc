@@ -1,6 +1,6 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.1
 
-## Novidades da V2.2
+## Novidades da V2.2.1
 
 ### Sequência entre operações
 - A operação seguinte já não precisa de esperar pelo fim completo da operação anterior.
