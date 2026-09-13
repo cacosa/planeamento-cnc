@@ -101,7 +101,7 @@
   </section>
 </main>
 
-<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.1</footer>
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.2</footer>
 
 <dialog id="jobDlg">
 <form id="jobForm">
@@ -152,6 +152,14 @@
 
   <div class="row"><h4>Operações</h4><button type="button" id="addOp">+ Operação</button></div>
   <div id="ops"></div>
+
+  <div class="sequence-box">
+    <div class="row">
+      <div><h4>Sequências permitidas — exceções</h4><p>Se não adicionar nenhuma sequência, aplica-se a regra geral: cada operação pode iniciar 1 hora após o início da operação anterior.</p></div>
+      <button type="button" id="addSequence">+ Sequência</button>
+    </div>
+    <div id="sequences"></div>
+  </div>
 
   <div class="row accessory-title"><h4>Acessórios</h4><button type="button" id="addAccessory">+ Acessório</button></div>
   <div id="accessories"></div>

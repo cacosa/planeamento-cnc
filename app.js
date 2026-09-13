@@ -96,7 +96,7 @@ function normalizeState(){
  state.calendar=Array.isArray(state.calendar)?state.calendar:[];
  Object.entries(state.saturdays||{}).filter(([,v])=>v).forEach(([date])=>{if(!state.calendar.some(x=>x.date===date))state.calendar.push({id:uid('cal'),date,type:'Sábado',description:'Sábado disponível (migrado da V2.0)',working:true,notes:''})});
 
- state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[];if(p.dimensionalReport===undefined)p.dimensionalReport=false});
+ state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[];if(p.dimensionalReport===undefined)p.dimensionalReport=false;if(!Array.isArray(p.allowedSequences))p.allowedSequences=[]});
  state.jobs.forEach(j=>{
    if(j.of===undefined)j.of='';
    if(j.completedDate===undefined)j.completedDate=null;
@@ -140,7 +140,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:220,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
+ return {version:222,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -367,13 +367,45 @@ function fillOps(mid,current=''){
 
 function sequenceCheck(j){
  let curOp=op(j.op),n=opNumber(curOp?.op);
- if(!curOp||n<=1||n===9999)return {ok:true};
+ if(!curOp||n===9999)return {ok:true};
  if(!j.of)return {ok:true};
+ let p=part(curOp.part),sequences=Array.isArray(p?.allowedSequences)?p.allowedSequences.filter(a=>Array.isArray(a)&&a.length):[];
+
+ // Exceções: cada linha representa uma sequência integral permitida para esta peça.
+ // A operação atual fica válida se respeitar pelo menos uma das sequências configuradas.
+ if(sequences.length){
+   let candidates=[];
+   for(const seq of sequences){
+     let idx=seq.indexOf(curOp.id);
+     if(idx<0)continue;
+     if(idx===0)return {ok:true};
+     let prevOpId=seq[idx-1],prev=op(prevOpId);
+     if(!prev)continue;
+     let prevJob=state.jobs
+       .filter(x=>x.id!==j.id&&x.of===j.of&&x.op===prevOpId)
+       .sort((a,b)=>jobStartDateTime(b)-jobStartDateTime(a))[0];
+     if(!prevJob){candidates.push({prev,missing:true});continue}
+     let prevStart=prevJob.actualStartAt?new Date(prevJob.actualStartAt):jobStartDateTime(prevJob),earliest=new Date(prevStart.getTime()+60*60000);
+     if(jobStartDateTime(j)>=earliest)return {ok:true};
+     candidates.push({prev,earliest,missing:false});
+   }
+   if(!candidates.length)return {ok:true};
+   let timed=candidates.filter(c=>!c.missing&&c.earliest).sort((a,b)=>a.earliest-b.earliest);
+   if(timed.length){
+     let c=timed[0];
+     return {ok:false,msg:`${curOp.op} só pode iniciar 1 hora após a operação anterior numa das sequências permitidas. Primeira hipótese válida: 1 hora após ${c.prev.op}, em ${c.earliest.toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}.`,earliest:c.earliest};
+   }
+   let names=[...new Set(candidates.map(c=>c.prev?.op).filter(Boolean))].join(' ou ');
+   return {ok:false,msg:`${curOp.op} ainda não pode ser planeada. Nas sequências permitidas, necessita primeiro de ${names||'uma operação anterior'} para a OF ${j.of}.`};
+ }
+
+ // Regra geral: OP seguinte pode iniciar 1 hora depois do início da OP imediatamente anterior.
+ if(n<=1)return {ok:true};
  let prevOp=state.ops.find(o=>o.part===curOp.part&&opNumber(o.op)===n-1);
  if(!prevOp)return {ok:true};
  let prevJob=state.jobs
    .filter(x=>x.id!==j.id&&x.of===j.of&&x.op===prevOp.id)
-   .sort((a,b)=>pd(b.start)-pd(a.start))[0];
+   .sort((a,b)=>jobStartDateTime(b)-jobStartDateTime(a))[0];
  if(!prevJob)return {ok:false,msg:`${curOp.op} não pode ser planeada antes de ${prevOp.op}. Não encontrei ${prevOp.op} para a OF ${j.of}.`};
  let prevStart=prevJob.actualStartAt?new Date(prevJob.actualStartAt):jobStartDateTime(prevJob),earliest=new Date(prevStart.getTime()+60*60000);
  if(jobStartDateTime(j)<earliest){
@@ -599,7 +631,8 @@ $('jobForm').onsubmit=e=>{
  if(!factoryWorkingDay(pd(j.start)))return $('jobError').textContent=pd(j.start).getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.';
  if(pd(j.start).getDay()===6&&!j.workSaturdays)return $('jobError').textContent='Para iniciar ao sábado, ative “Trabalhar aos sábados disponíveis”.';
  if(!turns(j))return $('jobError').textContent='Escolha pelo menos um operador.';
- let seq=sequenceCheck(j);if(!seq.ok)return $('jobError').textContent=seq.msg;
+ let sequencingChanged=!old||old.op!==j.op||old.of!==j.of||old.start!==j.start||old.startTime!==j.startTime;
+ if(sequencingChanged){let seq=sequenceCheck(j);if(!seq.ok)return $('jobError').textContent=seq.msg;}
  if((!old||old.machine!==j.machine||old.start!==j.start||old.startTime!==j.startTime)&&hasMachineOverlap(j,j.id))return $('jobError').textContent='Período já ocupado nesta máquina. Escolha outra hora ou outro dia.';
 
  if(j.status==='Concluída'){
@@ -655,9 +688,38 @@ $('delJob').onclick=()=>{
 function compatibilityGroups(){return COMPAT_GROUPS}
 function fillClients(){let s=$('pclient');s.innerHTML=state.clients.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}
 function nextOpLabel(){return `OP${$('ops').querySelectorAll('.oprow').length+1}`}
+function currentOpRows(){return [...$('ops').querySelectorAll('.oprow')]}
+function currentOpChoices(){return currentOpRows().map((r,i)=>({id:r.dataset.id,label:(r.querySelector('.oc').value.trim().toUpperCase()||`OP${i+1}`)}))}
+function readSequenceEditor(){
+ return [...$('sequences').querySelectorAll('.sequence-row')].map(r=>[...r.querySelectorAll('select')].map(x=>x.value).filter(Boolean));
+}
+function renderSequenceEditor(seqs=[]){
+ let root=$('sequences'),ops=currentOpChoices();root.innerHTML='';
+ if(!ops.length){root.innerHTML='<div class="sequence-empty">Crie primeiro as operações.</div>';return}
+ let normalized=(seqs||[]).filter(Array.isArray).map(seq=>{
+   let kept=seq.filter(id=>ops.some(o=>o.id===id));
+   for(const o of ops)if(!kept.includes(o.id))kept.push(o.id);
+   return kept.slice(0,ops.length);
+ });
+ if(!normalized.length){root.innerHTML='<div class="sequence-empty">Sem exceções. Aplica-se a regra geral entre operações.</div>';return}
+ normalized.forEach((seq,rowIndex)=>{
+   let r=document.createElement('div');r.className='sequence-row';r.dataset.index=rowIndex;
+   ops.forEach((o,i)=>{
+     let wrap=document.createElement('div');wrap.className='sequence-step';
+     let label=document.createElement('label');label.textContent=`${i+1}.ª operação`;
+     let sel=document.createElement('select');sel.className='sequence-select';
+     sel.innerHTML=ops.map(opt=>`<option value="${opt.id}" ${seq[i]===opt.id?'selected':''}>${esc(opt.label)}</option>`).join('');
+     wrap.append(label,sel);r.appendChild(wrap);
+   });
+   let del=document.createElement('button');del.type='button';del.className='danger';del.textContent='Remover sequência';del.onclick=()=>{r.remove();if(!$('sequences').querySelector('.sequence-row'))$('sequences').innerHTML='<div class="sequence-empty">Sem exceções. Aplica-se a regra geral entre operações.</div>'};r.appendChild(del);root.appendChild(r);
+ });
+}
+function syncSequenceEditorAfterOpsChange(){
+ let seqs=readSequenceEditor();renderSequenceEditor(seqs);
+}
 function opRow(o=null){
  o=o||{op:nextOpLabel(),min:10,setup:0,groups:[]};
- let r=document.createElement('div');r.className='oprow';r.dataset.id=o.id||'';
+ let r=document.createElement('div');r.className='oprow';r.dataset.id=o.id||uid('o');
  r.innerHTML=`<label>Operação<input class="oc" value="${esc(o.op)}"></label>
  <div><div style="font-size:14px;font-weight:600;margin-bottom:5px">Máquinas / grupos</div><div class="checks"></div></div>
  <label>Min/pç<input class="om" type="number" min="0.1" step="0.1" value="${o.min}"></label>
@@ -665,8 +727,15 @@ function opRow(o=null){
  <button type="button" class="danger ro">Remover</button>`;
  let c=r.querySelector('.checks');
  compatibilityGroups().forEach(g=>c.innerHTML+=`<label><input type="checkbox" value="${g}" ${o.groups.includes(g)?'checked':''}> ${g==='SERRALHARIA'?'Serralharia':g==='TORNOS_CONVENCIONAIS'?'Tornos convencionais':g}</label>`);
- r.querySelector('.ro').onclick=()=>r.remove();$('ops').appendChild(r);
+ r.querySelector('.ro').onclick=()=>{r.remove();syncSequenceEditorAfterOpsChange()};
+ r.querySelector('.oc').addEventListener('input',()=>syncSequenceEditorAfterOpsChange());
+ $('ops').appendChild(r);
 }
+function addAllowedSequence(){
+ let ops=currentOpChoices();if(!ops.length)return;
+ let seqs=readSequenceEditor();seqs.push(ops.map(o=>o.id));renderSequenceEditor(seqs);
+}
+
 function accessoryRow(a={id:'',name:'',qty:1}){
  let r=document.createElement('div');r.className='accrow';r.dataset.id=a.id||'';
  r.innerHTML=`<label>Acessório<input class="aname" value="${esc(a.name)}" placeholder="Ex.: Casquilho M16"></label>
@@ -685,18 +754,20 @@ function partsTable(){
  document.querySelectorAll('.ep').forEach(b=>b.onclick=()=>partDlg(b.dataset.id));
 }
 function partDlg(id=null){
- editPart=id;fillClients();$('ops').innerHTML='';$('accessories').innerHTML='';$('perror').textContent='';
+ editPart=id;fillClients();$('ops').innerHTML='';$('sequences').innerHTML='';$('accessories').innerHTML='';$('perror').textContent='';
  if(id){
    let p=part(id);$('partTitle').textContent='Editar peça';$('pcode').value=p.code;$('pdesc').value=p.desc;$('pclient').value=p.client;$('pDimensional').checked=!!p.dimensionalReport;
    state.ops.filter(o=>o.part===id).sort((a,b)=>opNumber(a.op)-opNumber(b.op)).forEach(opRow);
+   renderSequenceEditor(p.allowedSequences||[]);
    (p.accessories||[]).forEach(accessoryRow);$('delPart').classList.remove('hidden');
  }else{
-   $('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';$('pDimensional').checked=false;opRow({op:'OP1',min:10,setup:0,groups:[]});$('delPart').classList.add('hidden');
+   $('partTitle').textContent='Adicionar peça';$('pcode').value='';$('pdesc').value='';$('pDimensional').checked=false;opRow({op:'OP1',min:10,setup:0,groups:[]});renderSequenceEditor([]);$('delPart').classList.add('hidden');
  }
  $('partDlg').showModal();
 }
 $('addPart').onclick=()=>partDlg();
-$('addOp').onclick=()=>opRow({op:nextOpLabel(),min:10,setup:0,groups:[]});
+$('addOp').onclick=()=>{opRow({op:nextOpLabel(),min:10,setup:0,groups:[]});syncSequenceEditorAfterOpsChange()};
+$('addSequence').onclick=addAllowedSequence;
 $('addAccessory').onclick=()=>accessoryRow();
 
 $('partForm').onsubmit=e=>{
@@ -707,8 +778,15 @@ $('partForm').onsubmit=e=>{
  let rows=[...$('ops').querySelectorAll('.oprow')];if(!rows.length)return $('perror').textContent='Adicione pelo menos uma operação.';
  let labels=rows.map(r=>r.querySelector('.oc').value.trim().toUpperCase());
  if(new Set(labels).size!==labels.length)return $('perror').textContent='Não pode haver operações duplicadas.';
+ let allowedSequences=readSequenceEditor();
+ for(const seq of allowedSequences){
+   if(seq.length!==rows.length)return $('perror').textContent='Cada sequência permitida tem de incluir todas as operações.';
+   if(new Set(seq).size!==seq.length)return $('perror').textContent='A mesma operação não pode repetir-se dentro da mesma sequência.';
+   if(seq.some(id=>!rows.some(r=>r.dataset.id===id)))return $('perror').textContent='Existe uma sequência com uma operação que já não faz parte da peça.';
+ }
+ let seqKeys=allowedSequences.map(seq=>seq.join('>'));if(new Set(seqKeys).size!==seqKeys.length)return $('perror').textContent='Existem sequências permitidas duplicadas.';
  let accessories=[...$('accessories').querySelectorAll('.accrow')].map(r=>({id:r.dataset.id||uid('a'),name:r.querySelector('.aname').value.trim(),qty:+r.querySelector('.aqty').value})).filter(a=>a.name&&a.qty>0);
- let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value,accessories,dimensionalReport:$('pDimensional').checked};
+ let pid=editPart||uid('p'),p={id:pid,code,desc:$('pdesc').value.trim(),client:$('pclient').value,accessories,dimensionalReport:$('pDimensional').checked,allowedSequences};
  let pi=state.parts.findIndex(x=>x.id===pid);if(pi>=0)state.parts[pi]=p;else state.parts.push(p);
  let keep=[];
  for(let r of rows){
