@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.2
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.4
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -36,7 +36,7 @@ A aplicação aceita a programação se a operação respeitar pelo menos uma da
 ## Dados / Supabase
 - Continua a usar `public.app_state`.
 - **Não é necessário executar SQL novo.**
-- O snapshot passa a `version: 222` e continua compatível com os dados existentes.
+- O snapshot passa a `version: 224` e continua compatível com os dados existentes.
 - Antes da atualização, fazer sempre Backup pela aplicação.
 
 ## Publicação
@@ -57,3 +57,28 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 4. Programar a mesma OF respeitando cada uma das sequências alternativas.
 5. Tentar repetir uma operação na mesma sequência e confirmar que o sistema bloqueia.
 6. Editar apenas **Trabalhar aos sábados disponíveis** numa produção já programada e confirmar que a edição não é bloqueada pela sequência.
+
+
+## V2.2.3 — Exportação do Gantt para Excel
+- Novo botão **Exportar Gantt** junto de **Pesquisa**.
+- Exporta o período atualmente visível (2, 4 ou 6 semanas).
+- O ficheiro `.xlsx` inclui a folha **Gantt**, com máquinas nas linhas, calendário por dia/hora e cores dos estados, e uma folha **Detalhe** com os dados das produções visíveis.
+- Sábados, domingos e datas não produtivas ficam diferenciados no Excel.
+- A exportação usa ExcelJS carregado por CDN apenas quando a página abre; o restante funcionamento da aplicação não depende deste módulo.
+
+
+## V2.2.4 — Pesquisa universal e Resumo por máquina em PDF
+- A janela **Pesquisa** passa a ter uma única caixa de pesquisa.
+- O mesmo campo filtra por **OF, código da peça, nome/designação da peça ou máquina**.
+- A pesquisa é parcial: por exemplo, `UMC750` encontra UMC750-1, UMC750-2 e UMC750-3.
+- Novo botão **Resumo por máquina** junto da Pesquisa.
+- Permite escolher **data inicial, data final e uma ou várias máquinas**.
+- Inclui botões **Selecionar todas** e **Limpar seleção**.
+- O PDF é gerado em **A4 horizontal** e, para cada máquina selecionada, apresenta:
+  - listagem das produções no período (OF, peça, designação, OP, quantidade, início, fim, estado e operadores);
+  - mini-Gantt imediatamente abaixo da listagem.
+- O mini-Gantt mantém a leitura por dias, diferencia fins de semana e usa as cores dos estados do planeamento.
+- O PDF pode incluir várias máquinas na mesma página sempre que houver espaço; cria novas páginas automaticamente.
+- Período máximo do resumo: 62 dias, para manter a leitura do Gantt.
+- A geração do PDF usa jsPDF + AutoTable carregados por CDN.
+- **Não é necessário SQL novo.**

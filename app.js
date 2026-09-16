@@ -140,7 +140,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:222,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
+ return {version:224,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -902,8 +902,11 @@ function completeFromSearch(id){
  $('searchDlg').close();editJobOpen(j);$('status').value='Concluída';$('startJob').classList.add('hidden');$('completedDateWrap').classList.remove('hidden');$('jobCompletedAt').value=localDateTimeValue(new Date());$('jobFinalQty').value=j.finalQty??j.qty;$('jobRejectedQty').value=j.rejectedQty??0;$('jobError').textContent='Confirme a quantidade final produzida antes de guardar.';
 }
 function renderSearch(){
- let qOF=$('searchOF').value.trim().toLowerCase(),qPart=$('searchPart').value.trim();
- let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>(!qOF||String(x.info.of).toLowerCase().includes(qOF))&&(!qPart||String(x.info.part).includes(qPart))).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
+ let q=$('searchAny').value.trim().toLowerCase();
+ let rows=state.jobs.map(j=>({j,info:jobInfo(j)})).filter(x=>{
+   if(!q)return true;
+   return [x.info.of,x.info.part,x.info.desc,x.info.machine].some(v=>String(v??'').toLowerCase().includes(q));
+ }).sort((a,b)=>pd(b.info.start)-pd(a.info.start));
  $('searchSummary').textContent=rows.length?`${rows.length} registo(s) encontrado(s)`:'Nenhum registo encontrado';
  $('searchResults').innerHTML=rows.length?`<table class="search-table"><thead><tr><th>OF</th><th>Peça</th><th>Nome</th><th>OP</th><th>Máquina</th><th>Qtd. prog.</th><th>Qtd. final</th><th>Início previsto</th><th>Início real</th><th>Fim previsto</th><th>Fim real</th><th>Estado</th><th>Fim produção</th></tr></thead>
  <tbody>${rows.map(x=>`<tr><td><strong>${esc(x.info.of)}</strong></td><td>${esc(x.info.part)}</td><td>${esc(x.info.desc)}</td><td>${esc(x.info.op)}</td><td>${esc(x.info.machine)}</td><td>${x.info.qty}</td><td>${x.info.finalQty??'—'}</td>
@@ -912,9 +915,205 @@ function renderSearch(){
  <td class="finish-check"><input class="finish-production" data-id="${x.j.id}" type="checkbox" ${x.info.status==='Concluída'?'checked disabled':''} title="${x.info.status==='Concluída'?'Para reabrir, edite a produção.':'Marcar como concluída'}"></td></tr>`).join('')}</tbody></table>`:'';
  document.querySelectorAll('.finish-production:not(:disabled)').forEach(c=>c.onchange=()=>{if(c.checked)completeFromSearch(c.dataset.id)});
 }
-$('openSearch').onclick=()=>{$('searchOF').value='';$('searchPart').value='';renderSearch();$('searchDlg').showModal()};
-$('searchOF').addEventListener('input',renderSearch);$('searchPart').addEventListener('input',renderSearch);
-$('clearSearch').onclick=()=>{$('searchOF').value='';$('searchPart').value='';renderSearch()};
+$('openSearch').onclick=()=>{$('searchAny').value='';renderSearch();$('searchDlg').showModal()};
+async function exportGanttExcel(){
+ const btn=$('exportGantt');
+ if(!window.ExcelJS){
+   alert('Não foi possível carregar o módulo de exportação para Excel. Verifique a ligação à Internet e tente novamente.');
+   return;
+ }
+ const oldText=btn?.textContent;
+ if(btn){btn.disabled=true;btn.textContent='A exportar…'}
+ try{
+   const wb=new ExcelJS.Workbook();
+   wb.creator='FABCAST · Planeamento - Maquinação';
+   wb.created=new Date();
+   const ws=wb.addWorksheet('Gantt',{views:[{state:'frozen',xSplit:1,ySplit:4}]});
+   const totalDays=state.weeksVisible*7, hoursPerDay=24, firstHourCol=2, lastCol=firstHourCol+totalDays*hoursPerDay-1;
+   const visibleEnd=add(state.start,totalDays-1);
+
+   const colName=n=>{let x=n,r='';while(x){let m=(x-1)%26;r=String.fromCharCode(65+m)+r;x=Math.floor((x-1)/26)}return r};
+   const argb=hex=>'FF'+hex.replace('#','').toUpperCase();
+   const thin={style:'thin',color:{argb:'FFD7DCE3'}};
+   const fills={
+     blue1:'3B82F6',blue2:'93C5FD',late:'D9534F',done:'98A2B3',interrupted:'F59E0B',weekend:'EEF0F3',header:'E9EEF5',week:'DDE6F3',white:'FFFFFF'
+   };
+
+   ws.getColumn(1).width=24;
+   for(let c=firstHourCol;c<=lastCol;c++)ws.getColumn(c).width=1.55;
+   ws.mergeCells(1,1,1,lastCol);
+   const title=ws.getCell(1,1);
+   title.value=`FABCAST · Planeamento - Maquinação · Gantt · ${state.start.toLocaleDateString('pt-PT')} — ${visibleEnd.toLocaleDateString('pt-PT')}`;
+   title.font={bold:true,size:14,color:{argb:'FF17324D'}};title.alignment={vertical:'middle',horizontal:'left'};ws.getRow(1).height=24;
+
+   ws.getCell(2,1).value='Máquina';ws.getCell(3,1).value='Data';ws.getCell(4,1).value='Hora';
+   [2,3,4].forEach(r=>{let c=ws.getCell(r,1);c.font={bold:true};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(fills.header)}};c.border={top:thin,bottom:thin,left:thin,right:thin};c.alignment={horizontal:'center',vertical:'middle'}});
+
+   for(let w=0;w<state.weeksVisible;w++){
+     const sc=firstHourCol+w*7*hoursPerDay,ec=sc+7*hoursPerDay-1;
+     ws.mergeCells(2,sc,2,ec);
+     const cell=ws.getCell(2,sc);cell.value=`Semana ${isoWeek(add(state.start,w*7))}`;cell.font={bold:true};cell.alignment={horizontal:'center',vertical:'middle'};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(fills.week)}};
+   }
+
+   for(let d=0;d<totalDays;d++){
+     const day=add(state.start,d),sc=firstHourCol+d*hoursPerDay,ec=sc+hoursPerDay-1;
+     ws.mergeCells(3,sc,3,ec);
+     const cell=ws.getCell(3,sc);
+     cell.value=`${weekdayName(day)} ${compactDate(day)}`;cell.font={bold:true};cell.alignment={horizontal:'center',vertical:'middle'};
+     const nonworking=!factoryWorkingDay(day);cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(nonworking?fills.weekend:fills.header)}};
+     for(let h=0;h<24;h++){
+       const hc=ws.getCell(4,sc+h);hc.value=h%6===0?String(h).padStart(2,'0'):'';hc.font={size:8,color:{argb:'FF667085'}};hc.alignment={horizontal:'center'};
+       if(nonworking)hc.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(fills.weekend)}};
+     }
+   }
+
+   const machines=[...state.machines].filter(m=>m.active!==false).sort((a,b)=>machineOrder(a)-machineOrder(b));
+   machines.forEach((m,mi)=>{
+     const row=5+mi;ws.getRow(row).height=32;
+     const mc=ws.getCell(row,1);mc.value=m.code;mc.font={bold:true};mc.alignment={vertical:'middle'};mc.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF8FAFC'}};mc.border={top:thin,bottom:thin,left:thin,right:thin};
+     for(let d=0;d<totalDays;d++){
+       const day=add(state.start,d),nonworking=!factoryWorkingDay(day);
+       for(let h=0;h<24;h++){
+         const c=firstHourCol+d*24+h,cell=ws.getCell(row,c);cell.border={top:thin,bottom:thin,left:h===0?thin:undefined,right:h===23?thin:undefined};
+         if(nonworking)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(fills.weekend)}};
+       }
+     }
+
+     const jobs=state.jobs.filter(j=>j.machine===m.id).sort((a,b)=>jobStartDateTime(a)-jobStartDateTime(b));
+     jobs.forEach((j,idx)=>{
+       const o=op(j.op),p=part(o?.part);
+       let color=j.status==='Concluída'?fills.done:j.status==='Interrompida'?fills.interrupted:end(j)<new Date()?fills.late:(idx%2===0?fills.blue1:fills.blue2);
+       const fontColor=(color===fills.blue2||color===fills.interrupted)?'FF17324D':'FFFFFFFF';
+       jobWorkSegments(j).forEach(seg=>{
+         const dayIndex=Math.floor((new Date(seg.date).setHours(0,0,0,0)-new Date(state.start).setHours(0,0,0,0))/86400000);
+         if(dayIndex<0||dayIndex>=totalDays)return;
+         const startHour=Math.max(0,Math.min(23,Math.floor((seg.start-seg.date)/3600000)));
+         const endHourRaw=Math.ceil((seg.end-seg.date)/3600000);
+         const endHour=Math.max(startHour+1,Math.min(24,endHourRaw));
+         const sc=firstHourCol+dayIndex*24+startHour,ec=firstHourCol+dayIndex*24+endHour-1;
+         const label=`${j.of?`OF ${j.of} · `:''}${p?.code||''} · ${o?.op||''}`;
+         for(let c=sc;c<=ec;c++){
+           const cell=ws.getCell(row,c);cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:argb(color)}};cell.font={color:{argb:fontColor},size:9,bold:c===sc};cell.alignment={vertical:'middle',horizontal:'left',wrapText:false};
+         }
+         ws.getCell(row,sc).value=label;
+         ws.getCell(row,sc).note=[
+           `Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,`Quantidade: ${j.qty}`,
+           `Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT')}`,`Fim previsto: ${end(j).toLocaleString('pt-PT')}`,`Estado: ${j.status||'Programada'}`
+         ].join('\n');
+       });
+     });
+   });
+
+   ws.autoFilter={from:{row:4,column:1},to:{row:4,column:lastCol}};
+   ws.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:.2,right:.2,top:.3,bottom:.3,header:.15,footer:.15}};
+   ws.headerFooter.oddFooter='&L FABCAST&C Planeamento - Maquinação&R Página &P de &N';
+
+   const detail=wb.addWorksheet('Detalhe',{views:[{state:'frozen',ySplit:1}]});
+   const headers=['Máquina','OF','Peça','Designação','Operação','Qtd. programada','Qtd. final','Início previsto','Início real','Fim previsto','Fim real','Estado','Operadores','Sábados disponíveis','Interrupções (h)'];
+   detail.addRow(headers);
+   const hr=detail.getRow(1);hr.font={bold:true,color:{argb:'FFFFFFFF'}};hr.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1769E0'}};
+   state.jobs.filter(j=>{const st=jobStartDateTime(j),en=end(j);return en>=state.start&&st<add(state.start,totalDays)}).sort((a,b)=>jobStartDateTime(a)-jobStartDateTime(b)).forEach(j=>{
+     const o=op(j.op),p=part(o?.part),m=mach(j.machine),names=[j.m,j.a,j.n].filter(Boolean).map(id=>emp(id)?.name).filter(Boolean).join(', ');
+     detail.addRow([m?.code||'',j.of||'',p?.code||'',p?.desc||'',o?.op||'',j.qty,j.finalQty??'',jobStartDateTime(j),j.actualStartAt?new Date(j.actualStartAt):'',end(j),j.actualEndAt?new Date(j.actualEndAt):'',j.status||'Programada',names,j.workSaturdays?'Sim':'Não',Number(interruptionDelayHours(j).toFixed(2))]);
+   });
+   [8,9,10,11].forEach(c=>detail.getColumn(c).numFmt='dd/mm/yyyy hh:mm');
+   [1,2,3,4,5,12,13,14].forEach(c=>detail.getColumn(c).width=c===4?28:c===13?28:18);detail.getColumn(6).width=15;detail.getColumn(7).width=12;detail.getColumn(15).width=16;
+   detail.autoFilter={from:'A1',to:`O${Math.max(1,detail.rowCount)}`};
+
+   const buffer=await wb.xlsx.writeBuffer();
+   const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+   const stamp=`${ds(state.start)}_a_${ds(visibleEnd)}`;a.href=url;a.download=`Planeamento_Gantt_${stamp}.xlsx`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),800);
+ }catch(err){console.error(err);alert('Não foi possível exportar o Gantt para Excel. '+(err?.message||err));}
+ finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Exportar Gantt'}}
+}
+$('exportGantt').onclick=exportGanttExcel;
+
+$('searchAny').addEventListener('input',renderSearch);
+$('clearSearch').onclick=()=>{$('searchAny').value='';renderSearch()};
+
+function summaryJobsForMachine(machineId,startDate,endExclusive){
+ return state.jobs.filter(j=>j.machine===machineId&&end(j)>startDate&&jobStartDateTime(j)<endExclusive).sort((a,b)=>jobStartDateTime(a)-jobStartDateTime(b));
+}
+function openMachineSummary(){
+ const totalDays=state.weeksVisible*7;
+ $('summaryStart').value=ds(state.start);
+ $('summaryEnd').value=ds(add(state.start,totalDays-1));
+ const machines=[...state.machines].filter(m=>m.active!==false).sort((a,b)=>machineOrder(a)-machineOrder(b));
+ $('summaryMachines').innerHTML=machines.map(m=>`<label><input type="checkbox" class="summary-machine-check" value="${m.id}" checked> ${esc(m.code)}</label>`).join('');
+ $('summaryError').textContent='';
+ $('machineSummaryDlg').showModal();
+}
+$('machineSummaryBtn').onclick=openMachineSummary;
+$('summarySelectAll').onclick=()=>document.querySelectorAll('.summary-machine-check').forEach(c=>c.checked=true);
+$('summaryClearAll').onclick=()=>document.querySelectorAll('.summary-machine-check').forEach(c=>c.checked=false);
+
+function pdfStatusColor(j,idx){
+ if(j.status==='Concluída')return [152,162,179];
+ if(j.status==='Interrompida')return [242,153,74];
+ if(end(j)<new Date())return [217,83,79];
+ return idx%2===0?[159,197,255]:[37,99,184];
+}
+function pdfFormatDateTime(d){return d.toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).replace(',','')}
+function drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pageWidth){
+ const margin=10,labelW=29,right=10,totalW=pageWidth-margin-right,labelX=margin,ganttX=margin+labelW,ganttW=totalW-labelW;
+ const totalMs=endExclusive-startDate,totalDays=Math.max(1,Math.round(totalMs/86400000)),h=19;
+ doc.setFontSize(8);doc.setTextColor(31,41,55);doc.setFont(undefined,'bold');doc.text('Mini-Gantt',labelX,y+5);
+ // day background and labels
+ for(let i=0;i<totalDays;i++){
+   const d=add(startDate,i),x=ganttX+ganttW*i/totalDays,w=ganttW/totalDays;
+   const weekend=d.getDay()===0||d.getDay()===6;
+   if(weekend){doc.setFillColor(233,236,240);doc.rect(x,y,w,h,'F')}
+   doc.setDrawColor(215,222,231);doc.rect(x,y,w,h);
+   if(w>=7){doc.setFontSize(5.8);doc.setFont(undefined,'normal');doc.setTextColor(90,99,112);doc.text(compactDate(d),x+w/2,y+3.5,{align:'center'})}
+ }
+ // bars on distinct lanes to preserve sequence readability
+ const laneTop=y+5.5,laneH=Math.max(3,(h-6)/Math.max(1,Math.min(jobs.length,4)));
+ jobs.forEach((j,idx)=>{
+   const color=pdfStatusColor(j,idx);doc.setFillColor(...color);doc.setTextColor(...(color[2]>200?[24,48,78]:[255,255,255]));
+   const runs=jobRuns(j);
+   runs.forEach((run,ri)=>{
+     const runStart=new Date(run.startDate.getTime()+run.startFrac*86400000),runEnd=new Date(run.lastDate.getTime()+run.endFrac*86400000);
+     const a=Math.max(startDate.getTime(),runStart.getTime()),b=Math.min(endExclusive.getTime(),runEnd.getTime());if(b<=a)return;
+     const x=ganttX+ganttW*(a-startDate)/totalMs,w=Math.max(.7,ganttW*(b-a)/totalMs),lane=idx%4,yy=laneTop+lane*laneH;
+     doc.roundedRect(x,yy,w,Math.max(2.2,laneH-0.6),0.6,0.6,'F');
+     if(ri===0&&w>13){const o=op(j.op);doc.setFontSize(5.5);doc.setFont(undefined,'bold');doc.text(`${j.of?'OF '+j.of+' · ':''}${o?.op||''}`,x+1,yy+Math.max(2.1,laneH-1.3),{maxWidth:w-2})}
+   });
+ });
+ doc.setTextColor(31,41,55);return y+h;
+}
+async function generateMachineSummaryPdf(){
+ const err=$('summaryError');err.textContent='';
+ if(!window.jspdf?.jsPDF){err.textContent='Não foi possível carregar o módulo PDF. Verifique a ligação à Internet.';return}
+ const ids=[...document.querySelectorAll('.summary-machine-check:checked')].map(c=>c.value);
+ if(!ids.length){err.textContent='Selecione pelo menos uma máquina.';return}
+ const startStr=$('summaryStart').value,endStr=$('summaryEnd').value;
+ if(!startStr||!endStr){err.textContent='Defina a data inicial e final.';return}
+ const startDate=pd(startStr),endDate=pd(endStr);if(endDate<startDate){err.textContent='A data final não pode ser anterior à data inicial.';return}
+ const endExclusive=add(endDate,1),days=Math.round((endExclusive-startDate)/86400000);
+ if(days>62){err.textContent='Para manter o PDF legível, escolha um período até 62 dias.';return}
+ const btn=$('generateMachineSummary'),old=btn.textContent;btn.disabled=true;btn.textContent='A gerar…';
+ try{
+   const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),pw=doc.internal.pageSize.getWidth(),ph=doc.internal.pageSize.getHeight();
+   const machines=ids.map(id=>mach(id)).filter(Boolean).sort((a,b)=>machineOrder(a)-machineOrder(b));
+   let y=12;
+   const addHeader=()=>{doc.setTextColor(31,41,55);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('FABCAST - Planeamento por Máquinas',10,10);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.text(`Período: ${startDate.toLocaleDateString('pt-PT')} a ${endDate.toLocaleDateString('pt-PT')}`,pw-10,10,{align:'right'});y=16};
+   addHeader();
+   for(const m of machines){
+     const jobs=summaryJobsForMachine(m.id,startDate,endExclusive);
+     const estimatedTable=Math.max(12,8+jobs.length*5.2),blockEstimate=estimatedTable+26;
+     if(y+blockEstimate>ph-12){doc.addPage();addHeader()}
+     doc.setFillColor(238,243,249);doc.roundedRect(10,y,pw-20,7,1.2,1.2,'F');doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(23,105,224);doc.text(m.code,13,y+4.8);y+=9;
+     const body=jobs.length?jobs.map(j=>{const o=op(j.op),p=part(o?.part),names=[j.m,j.a,j.n].filter(Boolean).map(id=>emp(id)?.name).filter(Boolean).join(', ');return [j.of||'—',p?.code||'—',p?.desc||'—',o?.op||'—',String(j.qty),pdfFormatDateTime(jobStartDateTime(j)),pdfFormatDateTime(end(j)),j.status||'Programada',names||'—']}):[['—','—','Sem produção no período','—','—','—','—','—','—']];
+     doc.autoTable({startY:y,margin:{left:10,right:10},head:[['OF','Peça','Designação','OP','Qtd.','Início','Fim','Estado','Operador(es)']],body,theme:'grid',styles:{fontSize:6.5,cellPadding:1.25,overflow:'linebreak',valign:'middle'},headStyles:{fillColor:[23,105,224],textColor:255,fontStyle:'bold'},columnStyles:{0:{cellWidth:16},1:{cellWidth:19},2:{cellWidth:46},3:{cellWidth:13},4:{cellWidth:12},5:{cellWidth:30},6:{cellWidth:30},7:{cellWidth:25},8:{cellWidth:'auto'}},didParseCell:data=>{if(data.section==='body'&&jobs.length&&data.column.index===7){const j=jobs[data.row.index],c=pdfStatusColor(j,data.row.index);data.cell.styles.fillColor=c;data.cell.styles.textColor=c[2]>200?[24,48,78]:[255,255,255]}}});
+     y=(doc.lastAutoTable?.finalY||y)+3;
+     if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
+     y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
+   }
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.4`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
+ }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
+}
+$('generateMachineSummary').onclick=generateMachineSummaryPdf;
 
 function pendingAlerts(){return state.alerts.filter(a=>!a.read&&!a.closed&&!a.archived)}
 function renderAlertBadge(){
@@ -933,7 +1132,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.4',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);

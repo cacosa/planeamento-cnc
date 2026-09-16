@@ -30,6 +30,8 @@
     <button class="tab" data-v="people">Colaboradores</button>
     <button class="tab" data-v="calendar">Calendário de Produção</button>
     <button id="openSearch" type="button">Pesquisa</button>
+    <button id="machineSummaryBtn" type="button" title="Gerar resumo em PDF das máquinas selecionadas">Resumo por máquina</button>
+    <button id="exportGantt" type="button" title="Exportar o período visível do Gantt para Excel">Exportar Gantt</button>
     <button id="backupBtn" type="button">Backup</button>
   </nav>
 
@@ -101,7 +103,7 @@
   </section>
 </main>
 
-<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.2</footer>
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.4</footer>
 
 <dialog id="jobDlg">
 <form id="jobForm">
@@ -240,16 +242,35 @@
 
 <dialog id="searchDlg" class="search-dialog">
   <div class="row">
-    <div><h3>Pesquisa de produção</h3><p>Pesquise por OF ou código da peça; ao concluir, confirme a quantidade final produzida.</p></div>
+    <div><h3>Pesquisa de produção</h3><p>Pesquise numa única caixa por OF, código, nome/designação da peça ou máquina.</p></div>
     <button type="button" class="close" data-d="searchDlg">✕</button>
   </div>
-  <div class="search-controls">
-    <label>OF<input id="searchOF" placeholder="Ex.: 4587"></label>
-    <label>Código da peça<input id="searchPart" inputmode="numeric" placeholder="8 dígitos"></label>
+  <div class="search-controls universal-search-controls">
+    <label class="search-universal">Pesquisa<input id="searchAny" placeholder="OF, código, nome da peça ou máquina"></label>
     <button id="clearSearch" type="button">Limpar</button>
   </div>
   <div id="searchSummary" class="search-summary"></div>
   <div id="searchResults"></div>
+</dialog>
+
+<dialog id="machineSummaryDlg" class="summary-dialog">
+  <div class="dialog-pad">
+    <div class="row">
+      <div><h3>Resumo por máquina</h3><p>Escolha o período e as máquinas a incluir. O PDF terá a listagem e um mini-Gantt por máquina.</p></div>
+      <button type="button" class="close" data-d="machineSummaryDlg">✕</button>
+    </div>
+    <div class="summary-period">
+      <label>Data inicial<input id="summaryStart" type="date"></label>
+      <label>Data final<input id="summaryEnd" type="date"></label>
+    </div>
+    <div class="row summary-machine-head">
+      <h4>Máquinas a incluir</h4>
+      <div><button id="summarySelectAll" type="button">Selecionar todas</button> <button id="summaryClearAll" type="button">Limpar seleção</button></div>
+    </div>
+    <div id="summaryMachines" class="summary-machine-grid"></div>
+    <p id="summaryError" class="error"></p>
+    <div class="actions"><span></span><button type="button" class="close" data-d="machineSummaryDlg">Cancelar</button><button id="generateMachineSummary" type="button" class="primary">Gerar PDF</button></div>
+  </div>
 </dialog>
 
 <dialog id="alertsDlg" class="alerts-dialog">
@@ -322,6 +343,9 @@
 </dialog>
 
 <script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
