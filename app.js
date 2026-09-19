@@ -24,7 +24,7 @@ ops:[
 {id:'o2',part:'p1',op:'OP2',min:18,setup:2,groups:['UMC750','SL30','V8300']},
 {id:'o3',part:'p2',op:'OP1',min:32,setup:2,groups:['UMC750','UMC1000','SL30','V8300']}
 ],
-jobs:[],alerts:[],calendar:[]
+jobs:[],alerts:[],calendar:[],absences:[]
 };
 
 const state=JSON.parse(localStorage.getItem('cnc-v12')||'null')||structuredClone(seed);
@@ -94,6 +94,7 @@ function normalizeState(){
  state.alerts.forEach(a=>{if(!a.type)a.type='accessory'});
  state.saturdays=state.saturdays&&typeof state.saturdays==='object'?state.saturdays:{};
  state.calendar=Array.isArray(state.calendar)?state.calendar:[];
+ state.absences=Array.isArray(state.absences)?state.absences:[];
  Object.entries(state.saturdays||{}).filter(([,v])=>v).forEach(([date])=>{if(!state.calendar.some(x=>x.date===date))state.calendar.push({id:uid('cal'),date,type:'Sábado',description:'Sábado disponível (migrado da V2.0)',working:true,notes:''})});
 
  state.parts.forEach(p=>{if(!Array.isArray(p.accessories))p.accessories=[];if(p.dimensionalReport===undefined)p.dimensionalReport=false;if(!Array.isArray(p.allowedSequences))p.allowedSequences=[]});
@@ -140,11 +141,11 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:224,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[]};
+ return {version:225,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
- for(const k of ['clients','machines','employees','parts','ops','jobs','alerts','calendar'])if(Array.isArray(data[k]))state[k]=data[k];
+ for(const k of ['clients','machines','employees','parts','ops','jobs','alerts','calendar','absences'])if(Array.isArray(data[k]))state[k]=data[k];
  if(data.saturdays&&typeof data.saturdays==='object')state.saturdays=data.saturdays;
  normalizeState();
  return true;
@@ -169,7 +170,7 @@ async function writeRemoteState(){
 }
 function scheduleRemoteSave(){if(!remoteReady)return;clearTimeout(remoteSyncTimer);remoteSyncTimer=setTimeout(writeRemoteState,350)}
 function save(){
- localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar}));
+ localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar,absences:state.absences}));
  localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
  scheduleRemoteSave();
 }
@@ -180,7 +181,7 @@ async function bootstrapRemote(){
    const rows=await sbFetch('app_state?id=eq.1&select=data,updated_at');
    if(Array.isArray(rows)&&rows.length&&rows[0].data){
      applySnapshot(rows[0].data);
-     localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar}));
+     localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar,absences:state.absences}));
      localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
    }else{
      await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
@@ -222,9 +223,20 @@ function employeeWorkIntervalsForDay(e,d){
  }
  return intervals.filter(([a,b])=>b>a).map(([a,b])=>[new Date(day.getTime()+a*60000),new Date(day.getTime()+b*60000)]);
 }
+function absenceForEmployeeDate(employeeId,d){
+ return (state.absences||[]).find(a=>a.employeeId===employeeId&&a.date===ds(d))||null;
+}
+function effectiveEmployeeForJobDate(j,employeeId,d){
+ let a=absenceForEmployeeDate(employeeId,d);
+ if(!a)return emp(employeeId);
+ let replacementId=a.replacements?.[j.machine];
+ if(!replacementId)return null;
+ if(absenceForEmployeeDate(replacementId,d))return null;
+ return emp(replacementId);
+}
 function jobWorkIntervalsForDay(j,d){
  if(!jobWorkingDay(j,d))return [];
- let all=[j.m,j.a,j.n].filter(Boolean).flatMap(id=>employeeWorkIntervalsForDay(emp(id),d)).sort((x,y)=>x[0]-y[0]);
+ let all=[j.m,j.a,j.n].filter(Boolean).flatMap(id=>employeeWorkIntervalsForDay(effectiveEmployeeForJobDate(j,id,d),d)).sort((x,y)=>x[0]-y[0]);
  if(!all.length)return [];
  // Se o turno atravessa a meia-noite, não deixa a barra entrar num dia que não é produtivo para esta OF.
  const nextDay=add(new Date(d),1);nextDay.setHours(0,0,0,0);
@@ -339,7 +351,7 @@ function tabs(){
 }
 
 function render(){
- syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();calendarTable();fillPeople();renderAlertBadge();
+ syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();absencesTable();calendarTable();fillPeople();renderAlertBadge();
 }
 
 function canRunOnMachine(job,mid){let o=op(job.op),m=mach(mid);return !!(o&&m&&o.groups.includes(m.group))}
@@ -352,9 +364,13 @@ function fillPeople(){
    s.value=v;
  });
 }
-function fillOps(mid,current=''){
- let s=$('jobOp');
- let options=allowed(mid).sort((a,b)=>{
+function fillOps(mid,current='',query=''){
+ let s=$('jobOp'),q=String(query||'').trim().toLowerCase();
+ let options=allowed(mid).filter(o=>{
+   if(!q)return true;
+   let p=part(o.part),client=cname(p?.client);
+   return [p?.code,p?.desc,client,o.op].some(v=>String(v??'').toLowerCase().includes(q));
+ }).sort((a,b)=>{
    let pa=part(a.part),pb=part(b.part);
    return (pa?.code||'').localeCompare(pb?.code||'')||opNumber(a.op)-opNumber(b.op);
  });
@@ -362,8 +378,10 @@ function fillOps(mid,current=''){
    let p=part(o.part);
    return `<option value="${o.id}" ${o.id===current?'selected':''}>${esc(p?.code)} - ${esc(p?.desc)} - ${esc(o.op)} - ${o.min} min/pç</option>`;
  }).join('');
- if(!options.length)s.innerHTML='<option value="">Nenhuma peça/operação compatível com esta máquina</option>';
+ if(!options.length)s.innerHTML='<option value="">Nenhuma peça/operação compatível com esta pesquisa</option>';
+ if(current&&options.some(o=>o.id===current))s.value=current;
 }
+
 
 function sequenceCheck(j){
  let curOp=op(j.op),n=opNumber(curOp?.op);
@@ -441,7 +459,7 @@ function jobRuns(j){
 function gantt(){
  const totalDays=state.weeksVisible*7;
  let e=add(state.start,totalDays-1);
- $('period').textContent=`${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;
+ $('period').textContent=`Semanas ${isoWeek(state.start)}–${isoWeek(e)} · ${state.start.toLocaleDateString('pt-PT')} — ${e.toLocaleDateString('pt-PT')}`;
  let g=$('gantt');g.innerHTML='';
  g.style.setProperty('--days',String(totalDays));
  g.classList.remove('weeks-2','weeks-4','weeks-6');g.classList.add(`weeks-${state.weeksVisible}`);
@@ -541,7 +559,7 @@ function newJob(mid,day){
  if(!factoryWorkingDay(requested))return alert(requested.getDay()===0?'Domingo não é dia de trabalho.':'Esta data não está disponível no Calendário de Produção.');
  editJob=null;jobClickedAt=null;jobCtx={mid,day};$('jobError').textContent='';
  $('jobTitle').textContent='Nova produção';$('jobMeta').textContent=`${mach(mid)?.code} · ${requested.toLocaleDateString('pt-PT')}`;
- fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobTime').value='07:00';$('jobOF').value='';
+ $('jobOpSearch').value='';fillOps(mid);$('jobQty').value=20;$('jobDate').value=ds(requested);$('jobTime').value='07:00';$('jobOF').value='';
  $('jobCompletedAt').value='';$('jobFinalQty').value='';$('jobRejectedQty').value=0;
  $('completedDateWrap').classList.add('hidden');$('morn').value='';$('aft').value='';$('night').value='';$('status').value='Programada';
  renderJobInterruptions(null);$('jobWorkSaturdays').checked=requested.getDay()===6;$('startJob').classList.add('hidden');$('interruptJob').classList.add('hidden');$('resumeJob').classList.add('hidden');$('delJob').classList.add('hidden');$('jobDate').disabled=false;forecast();$('jobDlg').showModal();
@@ -549,7 +567,7 @@ function newJob(mid,day){
 function editJobOpen(j,clickedAt=null){
  editJob=j.id;jobClickedAt=clickedAt;jobCtx={mid:j.machine,day:Math.round((pd(j.start)-state.start)/86400000)};$('jobError').textContent='';
  $('jobTitle').textContent='Editar produção';$('jobMeta').textContent=`${mach(j.machine)?.code} · ${pd(j.start).toLocaleDateString('pt-PT')}`;
- fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobTime').value=j.startTime||inferJobStartTime(j);$('jobOF').value=j.of||'';
+ $('jobOpSearch').value='';fillOps(j.machine,j.op);$('jobQty').value=j.qty;$('jobDate').value=j.start;$('jobTime').value=j.startTime||inferJobStartTime(j);$('jobOF').value=j.of||'';
  $('jobCompletedAt').value=j.actualEndAt?localDateTimeValue(new Date(j.actualEndAt)):'';$('jobFinalQty').value=j.finalQty??'';$('jobRejectedQty').value=j.rejectedQty??0;$('completedDateWrap').classList.toggle('hidden',j.status!=='Concluída');
  $('jobDate').disabled=j.status==='Concluída';$('morn').value=j.m||'';$('aft').value=j.a||'';$('night').value=j.n||'';
  $('status').value=j.status||'Programada';renderJobInterruptions(j);$('jobWorkSaturdays').checked=!!j.workSaturdays;
@@ -574,6 +592,7 @@ function forecast(){
  $('forecast').textContent=txt;
 }
 ['jobOp','jobQty','jobDate','jobTime','jobOF','morn','aft','night','jobWorkSaturdays'].forEach(id=>$(id).addEventListener('input',forecast));
+$('jobOpSearch').addEventListener('input',()=>{let cur=$('jobOp').value;fillOps(jobCtx?.mid,cur,$('jobOpSearch').value);forecast()});
 $('status').addEventListener('change',()=>{
  let done=$('status').value==='Concluída';$('completedDateWrap').classList.toggle('hidden',!done);$('jobDate').disabled=done;if(done)$('startJob').classList.add('hidden');
  if(done){if(!$('jobCompletedAt').value)$('jobCompletedAt').value=localDateTimeValue(new Date());if($('jobFinalQty').value==='')$('jobFinalQty').value=$('jobQty').value}
@@ -887,6 +906,45 @@ function empDlg(id=null){
  $('ename').value=e?.name||'';$('eshift').value=e?.shift||'Manhã';$('estart').value=e?.start||def.start;$('eend').value=e?.end||def.end;$('breaks').innerHTML='';
  (e?.breaks||structuredClone(def.breaks)).forEach(addBreakRow);$('delEmp').classList.toggle('hidden',!id);$('eerror').textContent='';updateEmployeeNet();$('empDlg').showModal();
 }
+let editAbsence=null;
+function jobsUsingEmployeeOnDate(employeeId,dateStr){
+ const day=pd(dateStr),dayEnd=add(day,1);
+ return state.jobs.filter(j=>[j.m,j.a,j.n].includes(employeeId)&&jobStartDateTime(j)<dayEnd&&end(j)>day);
+}
+function absenceAffectedMachines(employeeId,dateStr){
+ const ids=[...new Set(jobsUsingEmployeeOnDate(employeeId,dateStr).map(j=>j.machine))];
+ return ids.map(id=>mach(id)).filter(Boolean).sort((a,b)=>machineOrder(a)-machineOrder(b));
+}
+function fillAbsenceEmployees(selected=''){
+ $('absenceEmployee').innerHTML=state.employees.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');
+ if(selected)$('absenceEmployee').value=selected;
+}
+function renderAbsenceMachineChoices(existing={}){
+ let eid=$('absenceEmployee').value,date=$('absenceDate').value,employee=emp(eid),root=$('absenceMachines');
+ $('absenceShift').value=employee?.shift||'';
+ if(!eid||!date){root.innerHTML='<div class="sequence-empty">Escolha o colaborador e a data.</div>';return}
+ let machines=absenceAffectedMachines(eid,date);
+ if(!machines.length){root.innerHTML='<div class="sequence-empty">Não encontrei produções deste colaborador nesta data. A ausência será registada na mesma.</div>';return}
+ let candidates=state.employees.filter(e=>e.id!==eid&&e.shift===employee?.shift).sort((a,b)=>a.name.localeCompare(b.name));
+ root.innerHTML=machines.map(m=>`<div class="absence-machine-row" data-machine="${m.id}"><strong>${esc(m.code)}</strong><label>Substituto<select class="absence-replacement"><option value="">— Sem substituto —</option>${candidates.map(e=>`<option value="${e.id}" ${existing?.[m.id]===e.id?'selected':''}>${esc(e.name)}</option>`).join('')}</select></label></div>`).join('');
+}
+function absenceDlg(id=null){
+ editAbsence=id;let a=(state.absences||[]).find(x=>x.id===id),today=ds(new Date());
+ $('absenceTitle').textContent=id?'Editar ausência':'Registar ausência';fillAbsenceEmployees(a?.employeeId||state.employees[0]?.id||'');
+ $('absenceDate').value=a?.date||today;$('absenceReason').value=a?.reason||'Falta';$('absenceNotes').value=a?.notes||'';$('absenceError').textContent='';
+ $('delAbsence').classList.toggle('hidden',!id);renderAbsenceMachineChoices(a?.replacements||{});$('absenceDlg').showModal();
+}
+function readAbsenceReplacements(){let out={};document.querySelectorAll('#absenceMachines .absence-machine-row').forEach(r=>{let v=r.querySelector('.absence-replacement')?.value;if(v)out[r.dataset.machine]=v});return out}
+function absencesTable(){
+ let rows=(state.absences||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(emp(a.employeeId)?.name||'').localeCompare(String(emp(b.employeeId)?.name||'')));
+ $('absencesTable').innerHTML=rows.length?`<table><thead><tr><th>Data</th><th>Colaborador</th><th>Turno</th><th>Motivo</th><th>Substituições</th><th></th></tr></thead><tbody>${rows.map(a=>{let e=emp(a.employeeId),reps=Object.entries(a.replacements||{}).map(([mid,eid])=>`${esc(mach(mid)?.code||mid)}: ${esc(emp(eid)?.name||'—')}`).join('<br>')||'Sem substituto';return `<tr><td>${pd(a.date).toLocaleDateString('pt-PT')}</td><td><strong>${esc(e?.name||'—')}</strong></td><td>${esc(e?.shift||'—')}</td><td>${esc(a.reason||'—')}</td><td>${reps}</td><td><button class="edit ea" data-id="${a.id}">Editar</button></td></tr>`}).join('')}</tbody></table>`:'<div class="sequence-empty">Sem ausências registadas.</div>';
+ document.querySelectorAll('.ea').forEach(b=>b.onclick=()=>absenceDlg(b.dataset.id));
+}
+$('addAbsence').onclick=()=>absenceDlg();
+$('absenceEmployee').addEventListener('change',()=>renderAbsenceMachineChoices(editAbsence?(state.absences.find(a=>a.id===editAbsence)?.replacements||{}):{}));
+$('absenceDate').addEventListener('change',()=>renderAbsenceMachineChoices(editAbsence?(state.absences.find(a=>a.id===editAbsence)?.replacements||{}):{}));
+$('absenceForm').onsubmit=e=>{e.preventDefault();let employeeId=$('absenceEmployee').value,date=$('absenceDate').value;if(!employeeId||!date)return $('absenceError').textContent='Escolha o colaborador e a data.';let x={id:editAbsence||uid('abs'),employeeId,date,reason:$('absenceReason').value,notes:$('absenceNotes').value.trim(),replacements:readAbsenceReplacements()};let i=state.absences.findIndex(a=>a.id===x.id);if(i>=0)state.absences[i]=x;else state.absences.push(x);repushAll();save();$('absenceDlg').close();render()};
+$('delAbsence').onclick=()=>{if(!editAbsence)return;if(!confirm('Eliminar esta ausência? O Gantt será recalculado.'))return;state.absences=state.absences.filter(a=>a.id!==editAbsence);repushAll();save();$('absenceDlg').close();render()};
 $('addEmp').onclick=()=>empDlg();$('addBreak').onclick=()=>{addBreakRow();updateEmployeeNet()};
 $('eshift').addEventListener('change',()=>{if(!editEmp){let d=shiftDefaults[$('eshift').value];$('estart').value=d.start;$('eend').value=d.end;$('breaks').innerHTML='';structuredClone(d.breaks).forEach(addBreakRow);updateEmployeeNet()}});
 ['estart','eend'].forEach(id=>$(id).addEventListener('input',updateEmployeeNet));
@@ -1132,15 +1190,15 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.4',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.5',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
 }
 $('backupBtn').onclick=downloadBackup;
 
-$('prev').onclick=()=>{state.start=add(state.start,-state.weeksVisible*7);gantt()};
-$('next').onclick=()=>{state.start=add(state.start,state.weeksVisible*7);gantt()};
+$('prev').onclick=()=>{state.start=add(state.start,-7);gantt()};
+$('next').onclick=()=>{state.start=add(state.start,7);gantt()};
 $('today').onclick=()=>{state.start=startWeek(new Date());gantt()};
 $('partsFilter').addEventListener('input',partsTable);
 $('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});

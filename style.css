@@ -396,3 +396,6 @@ nav #backupBtn{margin-left:auto}
 .summary-machine-grid label{font-weight:500;flex-direction:row;align-items:center;background:#fff;border:1px solid var(--b);border-radius:8px;padding:8px 10px}
 .summary-machine-grid input{padding:0;width:17px;height:17px}
 @media(max-width:700px){.summary-period{grid-template-columns:1fr}.universal-search-controls{grid-template-columns:1fr!important}}
+
+/* V2.2.5 — ausências e pesquisa rápida */
+.absences-card{margin-top:16px;padding:16px}.absences-card h3{margin-top:0}.absence-machine-row{display:grid;grid-template-columns:minmax(160px,.8fr) minmax(260px,1.2fr);gap:16px;align-items:end;padding:10px 0;border-bottom:1px solid var(--line,#dfe3e8)}.absence-machine-row:last-child{border-bottom:0}.absence-machine-row label{margin:0}#jobOpSearch{width:100%}@media(max-width:760px){.absence-machine-row{grid-template-columns:1fr}}

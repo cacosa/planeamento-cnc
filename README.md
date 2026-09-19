@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.4
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.5
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -67,7 +67,7 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - A exportação usa ExcelJS carregado por CDN apenas quando a página abre; o restante funcionamento da aplicação não depende deste módulo.
 
 
-## V2.2.4 — Pesquisa universal e Resumo por máquina em PDF
+## V2.2.5 — Pesquisa universal e Resumo por máquina em PDF
 - A janela **Pesquisa** passa a ter uma única caixa de pesquisa.
 - O mesmo campo filtra por **OF, código da peça, nome/designação da peça ou máquina**.
 - A pesquisa é parcial: por exemplo, `UMC750` encontra UMC750-1, UMC750-2 e UMC750-3.
@@ -82,3 +82,9 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Período máximo do resumo: 62 dias, para manter a leitura do Gantt.
 - A geração do PDF usa jsPDF + AutoTable carregados por CDN.
 - **Não é necessário SQL novo.**
+
+
+## Novidades V2.2.5
+- Registo de ausências de colaboradores por data/turno, com substituto opcional por máquina afetada; o Gantt recalcula a capacidade e os fins previstos.
+- Pesquisa rápida na janela **Nova produção** por código, designação, cliente ou operação, mantendo a compatibilidade da máquina.
+- Navegação do Gantt semana a semana: **Semana anterior · Hoje · Semana seguinte**, mantendo o horizonte de 2/4/6 semanas.
