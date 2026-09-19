@@ -141,7 +141,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:225,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
+ return {version:226,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -351,7 +351,67 @@ function tabs(){
 }
 
 function render(){
- syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();absencesTable();calendarTable();fillPeople();renderAlertBadge();
+ syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();absencesTable();calendarTable();fillPeople();renderPeopleLoad();renderAlertBadge();
+}
+
+
+function ensurePeopleLoadControls(){
+ const a=$('peopleLoadStart'),b=$('peopleLoadEnd'),sel=$('peopleLoadEmployee');
+ if(!a||!b||!sel)return;
+ if(!a.value)a.value=ds(state.start);
+ if(!b.value)b.value=ds(add(state.start,state.weeksVisible*7-1));
+ const old=sel.value;
+ sel.innerHTML='<option value="">Todos</option>'+state.employees.slice().sort((x,y)=>x.name.localeCompare(y.name)).map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('');
+ if([...sel.options].some(o=>o.value===old))sel.value=old;
+}
+function collaboratorAssignments(startDate,endExclusive,employeeFilter=''){
+ const byEmp=new Map();
+ const push=(eid,item)=>{if(employeeFilter&&eid!==employeeFilter)return;if(!byEmp.has(eid))byEmp.set(eid,[]);byEmp.get(eid).push(item)};
+ for(const j of state.jobs){
+   const o=op(j.op),p=part(o?.part),m=mach(j.machine);if(!o||!m)continue;
+   for(const sl of jobWorkSlices(j)){
+     if(sl.end<=startDate||sl.start>=endExclusive)continue;
+     const day=new Date(sl.date);
+     const originals=[j.m,j.a,j.n].filter(Boolean);
+     for(const originalId of originals){
+       const effective=effectiveEmployeeForJobDate(j,originalId,day);if(!effective)continue;
+       for(const [es,ee] of employeeWorkIntervalsForDay(effective,day)){
+         const st=new Date(Math.max(sl.start,startDate,es)),en=new Date(Math.min(sl.end,endExclusive,ee));
+         if(en<=st)continue;
+         push(effective.id,{start:st,end:en,machineId:m.id,machine:m.code,jobId:j.id,of:j.of||'—',part:p?.code||'—',desc:p?.desc||'',operation:o.op});
+       }
+     }
+   }
+ }
+ return byEmp;
+}
+function collaboratorOverlapRows(startDate,endExclusive,employeeFilter=''){
+ const rows=[],byEmp=collaboratorAssignments(startDate,endExclusive,employeeFilter);
+ for(const [eid,items] of byEmp){
+   const points=[...new Set(items.flatMap(x=>[x.start.getTime(),x.end.getTime()]))].sort((a,b)=>a-b);
+   let prev=null;
+   for(let i=0;i<points.length-1;i++){
+     const a=points[i],b=points[i+1];if(b<=a)continue;
+     const active=items.filter(x=>x.start.getTime()<b&&x.end.getTime()>a);
+     const byMachine=new Map();for(const x of active)if(!byMachine.has(x.machineId))byMachine.set(x.machineId,x);
+     const machines=[...byMachine.values()];if(machines.length<2)continue;
+     const machineKey=machines.map(x=>x.machineId).sort().join('|'),dayKey=ds(new Date(a));
+     if(prev&&prev.employeeId===eid&&prev.machineKey===machineKey&&prev.end.getTime()===a&&ds(prev.start)===dayKey){prev.end=new Date(b);continue}
+     prev={employeeId:eid,start:new Date(a),end:new Date(b),machines,machineKey,count:machines.length};rows.push(prev);
+   }
+ }
+ return rows.sort((x,y)=>x.start-y.start||String(emp(x.employeeId)?.name).localeCompare(String(emp(y.employeeId)?.name)));
+}
+function renderPeopleLoad(){
+ const root=$('peopleLoadTable');if(!root)return;
+ ensurePeopleLoadControls();
+ const s=$('peopleLoadStart').value,e=$('peopleLoadEnd').value,filter=$('peopleLoadEmployee').value;
+ if(!s||!e){root.innerHTML='<div class="empty">Defina o período.</div>';return}
+ const start=pd(s),last=pd(e);if(last<start){root.innerHTML='<div class="empty">A data final não pode ser anterior à inicial.</div>';return}
+ const rows=collaboratorOverlapRows(start,add(last,1),filter),share=rows.filter(r=>r.count<=3),danger=rows.filter(r=>r.count>3),employees=new Set(rows.map(r=>r.employeeId));
+ $('peopleLoadSummary').innerHTML=`<div class="load-kpi ok"><small>Colaboradores com sobreposição</small><strong>${employees.size}</strong></div><div class="load-kpi share"><small>Períodos com 2–3 máquinas</small><strong>${share.length}</strong></div><div class="load-kpi danger"><small>Períodos com mais de 3 máquinas</small><strong>${danger.length}</strong></div>`;
+ if(!rows.length){root.innerHTML='<div class="no-alerts">Não existem colaboradores em duas ou mais máquinas simultaneamente neste período.</div>';return}
+ root.innerHTML=`<table><thead><tr><th>Colaborador</th><th>Data</th><th>Intervalo</th><th>N.º máquinas</th><th>Máquinas</th><th>Produções</th><th>Situação</th></tr></thead><tbody>${rows.map(r=>{const ename=emp(r.employeeId)?.name||'—',details=r.machines.map(x=>`${esc(x.machine)} — OF ${esc(x.of)} · ${esc(x.part)} · ${esc(x.operation)}`).join('<br>'),machines=r.machines.map(x=>esc(x.machine)).join(', '),danger=r.count>3;return `<tr class="${danger?'load-row-danger':''}"><td><strong>${esc(ename)}</strong></td><td>${r.start.toLocaleDateString('pt-PT')}</td><td>${hhmmFromDate(r.start)}–${hhmmFromDate(r.end)}</td><td><strong>${r.count}</strong></td><td>${machines}</td><td>${details}</td><td><span class="load-badge ${danger?'danger':'share'}">${danger?'ATENÇÃO · >3 máquinas':'Partilha 2–3 máquinas'}</span></td></tr>`}).join('')}</tbody></table>`;
 }
 
 function canRunOnMachine(job,mid){let o=op(job.op),m=mach(mid);return !!(o&&m&&o.groups.includes(m.group))}
@@ -1167,7 +1227,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.4`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.6`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1190,7 +1250,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.5',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.6',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
@@ -1202,6 +1262,8 @@ $('next').onclick=()=>{state.start=add(state.start,7);gantt()};
 $('today').onclick=()=>{state.start=startWeek(new Date());gantt()};
 $('partsFilter').addEventListener('input',partsTable);
 $('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
+['peopleLoadStart','peopleLoadEnd','peopleLoadEmployee'].forEach(id=>$(id)?.addEventListener('change',renderPeopleLoad));
+$('refreshPeopleLoad')?.addEventListener('click',renderPeopleLoad);
 
 tabs();
 bootstrapRemote();

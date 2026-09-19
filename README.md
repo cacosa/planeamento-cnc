@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.5
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.6
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -88,3 +88,14 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Registo de ausências de colaboradores por data/turno, com substituto opcional por máquina afetada; o Gantt recalcula a capacidade e os fins previstos.
 - Pesquisa rápida na janela **Nova produção** por código, designação, cliente ou operação, mantendo a compatibilidade da máquina.
 - Navegação do Gantt semana a semana: **Semana anterior · Hoje · Semana seguinte**, mantendo o horizonte de 2/4/6 semanas.
+
+
+## Novidades V2.2.6 — Carga de Colaboradores
+- Novo separador **Carga Colaboradores**.
+- Escolha de período e, opcionalmente, de um colaborador.
+- Identifica períodos em que o mesmo colaborador está atribuído simultaneamente a 2 ou mais máquinas.
+- Situações com 2–3 máquinas aparecem como partilha normal de operador.
+- Situações com **mais de 3 máquinas** ficam destacadas como **ATENÇÃO**.
+- A tabela mostra colaborador, data, intervalo horário, número de máquinas, máquinas e OFs/operações envolvidas.
+- Considera o planeamento efetivo, turnos, ausências e substituições registadas.
+- Não requer novo SQL; continua a usar `app_state`.

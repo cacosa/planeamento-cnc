@@ -28,6 +28,7 @@
     <button class="tab" data-v="clients">Clientes</button>
     <button class="tab" data-v="machines">Máquinas / Recursos</button>
     <button class="tab" data-v="people">Colaboradores</button>
+    <button class="tab" data-v="peopleLoad">Carga Colaboradores</button>
     <button class="tab" data-v="calendar">Calendário de Produção</button>
     <button id="openSearch" type="button">Pesquisa</button>
     <button id="machineSummaryBtn" type="button" title="Gerar resumo em PDF das máquinas selecionadas">Resumo por máquina</button>
@@ -86,6 +87,22 @@
     <div class="card" id="machinesTable"></div>
   </section>
 
+
+  <section id="peopleLoad" class="view">
+    <div class="row">
+      <div><h2>Carga de Colaboradores</h2><p>Verifica colaboradores atribuídos simultaneamente a várias máquinas e destaca situações com mais de 3 máquinas.</p></div>
+      <button id="refreshPeopleLoad" class="primary" type="button">Atualizar análise</button>
+    </div>
+    <div class="load-filters card">
+      <label>Data inicial<input id="peopleLoadStart" type="date"></label>
+      <label>Data final<input id="peopleLoadEnd" type="date"></label>
+      <label>Colaborador<select id="peopleLoadEmployee"><option value="">Todos</option></select></label>
+    </div>
+    <div id="peopleLoadSummary" class="load-summary"></div>
+    <div class="card" id="peopleLoadTable"></div>
+    <p class="muted load-note">2 ou 3 máquinas em simultâneo são apresentadas como partilha de operador. Mais de 3 máquinas são destacadas como atenção.</p>
+  </section>
+
   <section id="calendar" class="view">
     <div class="row">
       <div><h2>Calendário de Produção</h2><p>Feriados, sábados disponíveis, encerramentos, férias coletivas e outros dias especiais.</p></div>
@@ -104,7 +121,7 @@
   </section>
 </main>
 
-<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.5</footer>
+<footer>FABCAST · Planeamento - Maquinação · Versão 2.2.6</footer>
 
 <dialog id="jobDlg">
 <form id="jobForm">
