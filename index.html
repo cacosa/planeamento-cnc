@@ -261,10 +261,11 @@
 
 <dialog id="absenceDlg">
 <form id="absenceForm">
-  <div class="row"><div><h3 id="absenceTitle">Registar ausência</h3><p>A ausência retira capacidade às máquinas onde o colaborador estiver planeado nesse turno, salvo substituição indicada.</p></div><button type="button" class="close" data-d="absenceDlg">✕</button></div>
+  <div class="row"><div><h3 id="absenceTitle">Registar ausência</h3><p>A ausência retira capacidade às máquinas onde o colaborador estiver planeado nesse turno durante o período indicado, salvo substituição indicada.</p></div><button type="button" class="close" data-d="absenceDlg">✕</button></div>
   <div class="grid">
     <label>Colaborador<select id="absenceEmployee" required></select></label>
-    <label>Data<input id="absenceDate" type="date" required></label>
+    <label>Data início<input id="absenceStartDate" type="date" required></label>
+    <label>Data fim<input id="absenceEndDate" type="date" required></label>
     <label>Turno<input id="absenceShift" disabled></label>
     <label>Motivo<select id="absenceReason"><option>Falta</option><option>Férias</option><option>Consulta médica</option><option>Formação</option><option>Outro</option></select></label>
     <label class="full">Observações<input id="absenceNotes"></label>

@@ -141,7 +141,7 @@ normalizeState();
 
 let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
 function snapshotState(){
- return {version:226,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
+ return {version:227,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -223,8 +223,11 @@ function employeeWorkIntervalsForDay(e,d){
  }
  return intervals.filter(([a,b])=>b>a).map(([a,b])=>[new Date(day.getTime()+a*60000),new Date(day.getTime()+b*60000)]);
 }
+function absenceStartDate(a){return a?.startDate||a?.date||''}
+function absenceEndDate(a){return a?.endDate||a?.startDate||a?.date||''}
 function absenceForEmployeeDate(employeeId,d){
- return (state.absences||[]).find(a=>a.employeeId===employeeId&&a.date===ds(d))||null;
+ const day=ds(d);
+ return (state.absences||[]).find(a=>a.employeeId===employeeId&&absenceStartDate(a)<=day&&absenceEndDate(a)>=day)||null;
 }
 function effectiveEmployeeForJobDate(j,employeeId,d){
  let a=absenceForEmployeeDate(employeeId,d);
@@ -971,8 +974,10 @@ function jobsUsingEmployeeOnDate(employeeId,dateStr){
  const day=pd(dateStr),dayEnd=add(day,1);
  return state.jobs.filter(j=>[j.m,j.a,j.n].includes(employeeId)&&jobStartDateTime(j)<dayEnd&&end(j)>day);
 }
-function absenceAffectedMachines(employeeId,dateStr){
- const ids=[...new Set(jobsUsingEmployeeOnDate(employeeId,dateStr).map(j=>j.machine))];
+function absenceAffectedMachines(employeeId,startStr,endStr){
+ if(!employeeId||!startStr||!endStr)return [];
+ const start=pd(startStr),endDay=add(pd(endStr),1);
+ const ids=[...new Set(state.jobs.filter(j=>[j.m,j.a,j.n].includes(employeeId)&&jobStartDateTime(j)<endDay&&end(j)>start).map(j=>j.machine))];
  return ids.map(id=>mach(id)).filter(Boolean).sort((a,b)=>machineOrder(a)-machineOrder(b));
 }
 function fillAbsenceEmployees(selected=''){
@@ -980,30 +985,31 @@ function fillAbsenceEmployees(selected=''){
  if(selected)$('absenceEmployee').value=selected;
 }
 function renderAbsenceMachineChoices(existing={}){
- let eid=$('absenceEmployee').value,date=$('absenceDate').value,employee=emp(eid),root=$('absenceMachines');
+ let eid=$('absenceEmployee').value,startDate=$('absenceStartDate').value,endDate=$('absenceEndDate').value,employee=emp(eid),root=$('absenceMachines');
  $('absenceShift').value=employee?.shift||'';
- if(!eid||!date){root.innerHTML='<div class="sequence-empty">Escolha o colaborador e a data.</div>';return}
- let machines=absenceAffectedMachines(eid,date);
- if(!machines.length){root.innerHTML='<div class="sequence-empty">Não encontrei produções deste colaborador nesta data. A ausência será registada na mesma.</div>';return}
+ if(!eid||!startDate||!endDate){root.innerHTML='<div class="sequence-empty">Escolha o colaborador e o período.</div>';return}
+ if(endDate<startDate){root.innerHTML='<div class="sequence-empty">A data fim não pode ser anterior à data início.</div>';return}
+ let machines=absenceAffectedMachines(eid,startDate,endDate);
+ if(!machines.length){root.innerHTML='<div class="sequence-empty">Não encontrei produções deste colaborador neste período. A ausência será registada na mesma.</div>';return}
  let candidates=state.employees.filter(e=>e.id!==eid&&e.shift===employee?.shift).sort((a,b)=>a.name.localeCompare(b.name));
  root.innerHTML=machines.map(m=>`<div class="absence-machine-row" data-machine="${m.id}"><strong>${esc(m.code)}</strong><label>Substituto<select class="absence-replacement"><option value="">— Sem substituto —</option>${candidates.map(e=>`<option value="${e.id}" ${existing?.[m.id]===e.id?'selected':''}>${esc(e.name)}</option>`).join('')}</select></label></div>`).join('');
 }
 function absenceDlg(id=null){
  editAbsence=id;let a=(state.absences||[]).find(x=>x.id===id),today=ds(new Date());
  $('absenceTitle').textContent=id?'Editar ausência':'Registar ausência';fillAbsenceEmployees(a?.employeeId||state.employees[0]?.id||'');
- $('absenceDate').value=a?.date||today;$('absenceReason').value=a?.reason||'Falta';$('absenceNotes').value=a?.notes||'';$('absenceError').textContent='';
+ $('absenceStartDate').value=absenceStartDate(a)||today;$('absenceEndDate').value=absenceEndDate(a)||today;$('absenceReason').value=a?.reason||'Falta';$('absenceNotes').value=a?.notes||'';$('absenceError').textContent='';
  $('delAbsence').classList.toggle('hidden',!id);renderAbsenceMachineChoices(a?.replacements||{});$('absenceDlg').showModal();
 }
 function readAbsenceReplacements(){let out={};document.querySelectorAll('#absenceMachines .absence-machine-row').forEach(r=>{let v=r.querySelector('.absence-replacement')?.value;if(v)out[r.dataset.machine]=v});return out}
 function absencesTable(){
- let rows=(state.absences||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(emp(a.employeeId)?.name||'').localeCompare(String(emp(b.employeeId)?.name||'')));
- $('absencesTable').innerHTML=rows.length?`<table><thead><tr><th>Data</th><th>Colaborador</th><th>Turno</th><th>Motivo</th><th>Substituições</th><th></th></tr></thead><tbody>${rows.map(a=>{let e=emp(a.employeeId),reps=Object.entries(a.replacements||{}).map(([mid,eid])=>`${esc(mach(mid)?.code||mid)}: ${esc(emp(eid)?.name||'—')}`).join('<br>')||'Sem substituto';return `<tr><td>${pd(a.date).toLocaleDateString('pt-PT')}</td><td><strong>${esc(e?.name||'—')}</strong></td><td>${esc(e?.shift||'—')}</td><td>${esc(a.reason||'—')}</td><td>${reps}</td><td><button class="edit ea" data-id="${a.id}">Editar</button></td></tr>`}).join('')}</tbody></table>`:'<div class="sequence-empty">Sem ausências registadas.</div>';
+ let rows=(state.absences||[]).slice().sort((a,b)=>String(absenceStartDate(b)).localeCompare(String(absenceStartDate(a)))||String(emp(a.employeeId)?.name||'').localeCompare(String(emp(b.employeeId)?.name||'')));
+ $('absencesTable').innerHTML=rows.length?`<table><thead><tr><th>Período</th><th>Colaborador</th><th>Turno</th><th>Motivo</th><th>Substituições</th><th></th></tr></thead><tbody>${rows.map(a=>{let e=emp(a.employeeId),start=absenceStartDate(a),finish=absenceEndDate(a),period=start===finish?pd(start).toLocaleDateString('pt-PT'):`${pd(start).toLocaleDateString('pt-PT')} — ${pd(finish).toLocaleDateString('pt-PT')}`,reps=Object.entries(a.replacements||{}).map(([mid,eid])=>`${esc(mach(mid)?.code||mid)}: ${esc(emp(eid)?.name||'—')}`).join('<br>')||'Sem substituto';return `<tr><td>${period}</td><td><strong>${esc(e?.name||'—')}</strong></td><td>${esc(e?.shift||'—')}</td><td>${esc(a.reason||'—')}</td><td>${reps}</td><td><button class="edit ea" data-id="${a.id}">Editar</button></td></tr>`}).join('')}</tbody></table>`:'<div class="sequence-empty">Sem ausências registadas.</div>';
  document.querySelectorAll('.ea').forEach(b=>b.onclick=()=>absenceDlg(b.dataset.id));
 }
 $('addAbsence').onclick=()=>absenceDlg();
 $('absenceEmployee').addEventListener('change',()=>renderAbsenceMachineChoices(editAbsence?(state.absences.find(a=>a.id===editAbsence)?.replacements||{}):{}));
-$('absenceDate').addEventListener('change',()=>renderAbsenceMachineChoices(editAbsence?(state.absences.find(a=>a.id===editAbsence)?.replacements||{}):{}));
-$('absenceForm').onsubmit=e=>{e.preventDefault();let employeeId=$('absenceEmployee').value,date=$('absenceDate').value;if(!employeeId||!date)return $('absenceError').textContent='Escolha o colaborador e a data.';let x={id:editAbsence||uid('abs'),employeeId,date,reason:$('absenceReason').value,notes:$('absenceNotes').value.trim(),replacements:readAbsenceReplacements()};let i=state.absences.findIndex(a=>a.id===x.id);if(i>=0)state.absences[i]=x;else state.absences.push(x);repushAll();save();$('absenceDlg').close();render()};
+['absenceStartDate','absenceEndDate'].forEach(id=>$(id).addEventListener('change',()=>renderAbsenceMachineChoices(editAbsence?(state.absences.find(a=>a.id===editAbsence)?.replacements||{}):{})));
+$('absenceForm').onsubmit=e=>{e.preventDefault();let employeeId=$('absenceEmployee').value,startDate=$('absenceStartDate').value,endDate=$('absenceEndDate').value;if(!employeeId||!startDate||!endDate)return $('absenceError').textContent='Escolha o colaborador e o período.';if(endDate<startDate)return $('absenceError').textContent='A data fim não pode ser anterior à data início.';let x={id:editAbsence||uid('abs'),employeeId,startDate,endDate,reason:$('absenceReason').value,notes:$('absenceNotes').value.trim(),replacements:readAbsenceReplacements()};let i=state.absences.findIndex(a=>a.id===x.id);if(i>=0)state.absences[i]=x;else state.absences.push(x);repushAll();save();$('absenceDlg').close();render()};
 $('delAbsence').onclick=()=>{if(!editAbsence)return;if(!confirm('Eliminar esta ausência? O Gantt será recalculado.'))return;state.absences=state.absences.filter(a=>a.id!==editAbsence);repushAll();save();$('absenceDlg').close();render()};
 $('addEmp').onclick=()=>empDlg();$('addBreak').onclick=()=>{addBreakRow();updateEmployeeNet()};
 $('eshift').addEventListener('change',()=>{if(!editEmp){let d=shiftDefaults[$('eshift').value];$('estart').value=d.start;$('eend').value=d.end;$('breaks').innerHTML='';structuredClone(d.breaks).forEach(addBreakRow);updateEmployeeNet()}});
