@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.7
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.8
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -106,3 +106,14 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Mantém compatibilidade com ausências antigas de um único dia.
 - As máquinas afetadas são calculadas considerando todo o período da ausência.
 - O Gantt recalcula a capacidade em todos os dias do intervalo.
+
+
+## V2.2.8 — Correção global da fila das máquinas
+
+- Corrigida a regressão em que uma barra podia aumentar e sobrepor-se à produção seguinte.
+- A correção aplica-se a **todas as máquinas e recursos**.
+- Sempre que uma produção cresce, a aplicação verifica a fila da máquina e empurra as produções seguintes apenas o necessário para eliminar sobreposições.
+- A regra aplica-se a aumentos provocados por interrupções, ausências, alteração de quantidade, tempo por peça ou setup.
+- Durante uma interrupção ativa, a fila é revalidada periodicamente para acompanhar o crescimento da barra em tempo real.
+- Mantém-se a regra anterior: se uma produção encurtar, as seguintes **não são puxadas automaticamente para trás**.
+- Não requer alterações SQL no Supabase.

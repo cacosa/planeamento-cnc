@@ -354,6 +354,9 @@ function tabs(){
 }
 
 function render(){
+ // Garante, em todas as máquinas, que uma produção que aumentou nunca fica por cima da seguinte.
+ // A fila só é empurrada para a frente; uma redução de duração não puxa automaticamente as OFs para trás.
+ keepMachineQueuesSeparated({persist:true});
  syncStartAlerts();gantt();partsTable();clientsTable();machinesTable();peopleTable();absencesTable();calendarTable();fillPeople();renderPeopleLoad();renderAlertBadge();
 }
 
@@ -737,17 +740,32 @@ $('jobForm').onsubmit=e=>{
 };
 
 function push(mid){
+ let changed=false;
  let a=state.jobs.filter(j=>j.machine===mid).sort((x,y)=>jobStartDateTime(x)-jobStartDateTime(y));
  for(let i=0;i<a.length;i++){
-   let cur=a[i],curStart=firstJobWorkInstantAtOrAfter(cur,jobStartDateTime(cur));
-   if(curStart>jobStartDateTime(cur))setJobStartDateTime(cur,curStart);
+   let cur=a[i],before=jobStartDateTime(cur),curStart=firstJobWorkInstantAtOrAfter(cur,before);
+   if(curStart>before){setJobStartDateTime(cur,curStart);changed=true}
    if(i===0)continue;
    let prev=a[i-1],prevEnd=end(prev),now=jobStartDateTime(cur);
-   if(now<prevEnd){let next=firstJobWorkInstantAtOrAfter(cur,prevEnd);if(next>now)setJobStartDateTime(cur,next)}
+   if(now<prevEnd){
+     let next=firstJobWorkInstantAtOrAfter(cur,prevEnd);
+     if(next>now){setJobStartDateTime(cur,next);changed=true}
+   }
  }
+ return changed;
 }
 
-function repushAll(){state.machines.forEach(m=>push(m.id))}
+function repushAll(){
+ let changed=false;
+ state.machines.forEach(m=>{if(push(m.id))changed=true});
+ return changed;
+}
+
+function keepMachineQueuesSeparated({persist=false}={}){
+ const changed=repushAll();
+ if(changed&&persist)save();
+ return changed;
+}
 $('delJob').onclick=()=>{
  let j=state.jobs.find(x=>x.id===editJob);
  if(!j)return;
@@ -1233,7 +1251,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.6`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.8`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1256,7 +1274,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.6',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.8',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
@@ -1270,6 +1288,18 @@ $('partsFilter').addEventListener('input',partsTable);
 $('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('weeksVisible').value)||4;gantt()});
 ['peopleLoadStart','peopleLoadEnd','peopleLoadEmployee'].forEach(id=>$(id)?.addEventListener('change',renderPeopleLoad));
 $('refreshPeopleLoad')?.addEventListener('click',renderPeopleLoad);
+
+// Enquanto existir uma interrupção ativa, a duração efetiva cresce com o tempo.
+// Revalida todas as filas periodicamente para que as OFs seguintes sejam empurradas
+// antes de ocorrer qualquer sobreposição visual ou temporal.
+setInterval(()=>{
+ const hasActive=state.jobs.some(j=>activeInterruption(j));
+ if(!hasActive)return;
+ const changed=keepMachineQueuesSeparated({persist:true});
+ // Mesmo sem deslocações, redesenha para atualizar o crescimento da barra interrompida.
+ gantt();
+ if(changed)renderPeopleLoad();
+},60000);
 
 tabs();
 bootstrapRemote();
