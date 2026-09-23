@@ -1,4 +1,12 @@
-# PLANEAMENTO - MAQUINAÇÃO · V3.0
+# PLANEAMENTO - MAQUINAÇÃO · V3.1
+
+## Alteração V3.1 — fim real ajusta a barra
+
+- Ao concluir uma produção, a barra passa a terminar na data/hora real de conclusão.
+- Se o fim real for posterior ao previsto, a barra cresce e a fila seguinte da mesma máquina é empurrada em cascata.
+- Se o fim real for anterior ao previsto, a barra encolhe, mas as produções seguintes não são puxadas para trás.
+- O fim previsto fica preservado separadamente para consulta.
+- Não requer alterações no Supabase.
 
 ## V3.0 — nova base estável
 - Criada a partir da linha estável V2.2.8.x.

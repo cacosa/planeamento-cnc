@@ -102,6 +102,7 @@ function normalizeState(){
    if(j.of===undefined)j.of='';
    if(j.completedDate===undefined)j.completedDate=null;
    if(j.plannedEnd===undefined)j.plannedEnd=null;
+   if(j.plannedEndAt===undefined)j.plannedEndAt=null;
    if(j.workSaturdays===undefined)j.workSaturdays=false;
    if(!Array.isArray(j.interruptions))j.interruptions=[];
    if(j.actualStartAt===undefined)j.actualStartAt=null;
@@ -309,7 +310,7 @@ function firstJobWorkInstantAtOrAfter(j,at){
  }
  return new Date(at);
 }
-function jobWorkSlices(j){
+function plannedJobWorkSlices(j){
  let remaining=effectiveHours(j),slices=[],cursor=firstJobWorkInstantAtOrAfter(j,jobStartDateTime(j)),guard=0;
  if(remaining<=1e-9)return slices;
  while(remaining>1e-9&&guard++<5000){
@@ -329,6 +330,33 @@ function jobWorkSlices(j){
  }
  return slices;
 }
+function actualCompletedWorkSlices(j){
+ const start=firstJobWorkInstantAtOrAfter(j,jobStartDateTime(j));
+ const finish=j.actualEndAt?new Date(j.actualEndAt):null;
+ if(!finish||Number.isNaN(finish.getTime())||finish<=start)return [];
+ let slices=[],day=new Date(start);day.setHours(0,0,0,0),guard=0;
+ while(day<=finish&&guard++<5000){
+   if(jobWorkingDay(j,day)){
+     for(const [a,b] of jobWorkIntervalsForDay(j,day)){
+       let from=new Date(Math.max(start,a)),to=new Date(Math.min(finish,b));
+       if(to>from)slices.push({start:from,end:to,date:new Date(day)});
+     }
+   }
+   day=add(day,1);day.setHours(0,0,0,0);
+ }
+ // Se a hora real de conclusão cair fora de um intervalo produtivo, conserva o fim real
+ // como ocupação da máquina para efeitos de fila, mas sem desenhar barra em períodos não produtivos.
+ return slices;
+}
+function jobWorkSlices(j){
+ if(j.status==='Concluída'&&j.actualEndAt)return actualCompletedWorkSlices(j);
+ return plannedJobWorkSlices(j);
+}
+function plannedEndDateTime(j){
+ if(j.plannedEndAt){let d=new Date(j.plannedEndAt);if(!Number.isNaN(d.getTime()))return d}
+ let clone={...j,status:j.status==='Concluída'?'Programada':j.status,actualEndAt:null};
+ let s=plannedJobWorkSlices(clone);return s.length?new Date(s[s.length-1].end):jobStartDateTime(clone);
+}
 function jobWorkSegments(j){
  const byDay=new Map();
  for(const sl of jobWorkSlices(j)){
@@ -338,7 +366,7 @@ function jobWorkSegments(j){
  }
  return [...byDay.values()].sort((a,b)=>a.date-b.date).map(x=>({date:x.date,start:x.start,end:x.end,startFrac:(x.start-x.date)/86400000,endFrac:(x.end-x.date)/86400000}));
 }
-function end(j){let s=jobWorkSlices(j);return s.length?new Date(s[s.length-1].end):jobStartDateTime(j)}
+function end(j){if(j.status==='Concluída'&&j.actualEndAt){let d=new Date(j.actualEndAt);if(!Number.isNaN(d.getTime()))return d}let s=jobWorkSlices(j);return s.length?new Date(s[s.length-1].end):jobStartDateTime(j)}
 function jobLastWorkDate(j){let e=end(j);e.setHours(0,0,0,0);return e}
 function nextStartAfterJob(j,targetJob=null){return firstJobWorkInstantAtOrAfter(targetJob||j,end(j))}
 function dur(j){return (end(j)-jobStartDateTime(j))/86400000}
@@ -605,7 +633,7 @@ function gantt(){
        `Quantidade: ${j.qty}`,`Tempo: ${hrs(j).toFixed(1)} h`,`Capacidade: ${fmtHours(jobCapacityHours(j))}/dia`,
        `Operadores: ${names}`,`Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
        j.actualStartAt?`Início real: ${fmtDateTime(j.actualStartAt)}`:'Início real: ainda não confirmado',
-       `Fim previsto: ${end(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
+       `Fim previsto: ${plannedEndDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`, 
        j.actualEndAt?`Fim real: ${fmtDateTime(j.actualEndAt)}`:j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
        j.status==='Concluída'?`Quantidade final: ${j.finalQty??j.qty}${j.rejectedQty?` · rejeitada: ${j.rejectedQty}`:''}`:'',
        j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
@@ -671,7 +699,7 @@ function formJob(){
  let chosen=$('jobDate').value||old?.start||ds(add(state.start,jobCtx.day)),chosenTime=$('jobTime').value||old?.startTime||'07:00';
  return {id:editJob||uid('j'),machine:jobCtx.mid,op:$('jobOp').value,of:$('jobOF').value.trim(),qty:Math.max(1,Math.floor(+$('jobQty').value||1)),
    start:chosen,startTime:chosenTime,m:$('morn').value||null,a:$('aft').value||null,n:$('night').value||null,status:$('status').value,
-   completedDate:old?.completedDate||null,plannedEnd:old?.plannedEnd||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[]),
+   completedDate:old?.completedDate||null,plannedEnd:old?.plannedEnd||null,plannedEndAt:old?.plannedEndAt||null,workSaturdays:$('jobWorkSaturdays').checked,interruptions:structuredClone(old?.interruptions||[]),
    actualStartAt:old?.actualStartAt||null,actualEndAt:old?.actualEndAt||null,finalQty:old?.finalQty??null,rejectedQty:old?.rejectedQty??0};
 }
 function forecast(){
@@ -750,12 +778,14 @@ $('jobForm').onsubmit=e=>{
    const finalQty=Math.max(0,Math.floor(+$('jobFinalQty').value));
    if(!Number.isFinite(finalQty))return $('jobError').textContent='Indique a quantidade final produzida.';
    if($('jobFinalQty').value==='')return $('jobError').textContent='Indique a quantidade final produzida.';
+   const plannedBeforeCompletion=plannedEndDateTime({...j,status:'Programada',actualEndAt:null});
    const endValue=$('jobCompletedAt').value||localDateTimeValue(new Date());
    j.actualEndAt=new Date(endValue).toISOString();j.completedDate=ds(new Date(j.actualEndAt));j.finalQty=finalQty;j.rejectedQty=Math.max(0,Math.floor(+$('jobRejectedQty').value||0));
    if(!j.actualStartAt)j.actualStartAt=jobStartDateTime(j).toISOString();
-   if(!j.plannedEnd)j.plannedEnd=ds(jobLastWorkDate({...j,status:'Programada'}));
+   if(!j.plannedEndAt)j.plannedEndAt=plannedBeforeCompletion.toISOString();
+   if(!j.plannedEnd)j.plannedEnd=ds(plannedBeforeCompletion);
  }else{
-   j.completedDate=null;j.actualEndAt=null;j.finalQty=null;j.rejectedQty=0;j.plannedEnd=null;
+   j.completedDate=null;j.actualEndAt=null;j.finalQty=null;j.rejectedQty=0;j.plannedEnd=null;j.plannedEndAt=null;
  }
  if(j.status==='Em produção'&&!j.actualStartAt)j.actualStartAt=new Date().toISOString();
  let oldMachine=old?.machine,i=state.jobs.findIndex(x=>x.id===j.id);
@@ -1205,7 +1235,7 @@ async function exportGanttExcel(){
          ws.getCell(row,sc).value=label;
          ws.getCell(row,sc).note=[
            `Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,`Quantidade: ${j.qty}`,
-           `Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT')}`,`Fim previsto: ${end(j).toLocaleString('pt-PT')}`,`Estado: ${j.status||'Programada'}`
+           `Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT')}`,`Fim previsto: ${plannedEndDateTime(j).toLocaleString('pt-PT')}`,`Estado: ${j.status||'Programada'}`
          ].join('\n');
        });
      });
@@ -1316,7 +1346,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V3.0`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V3.1`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1339,7 +1369,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'3.0',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'3.1',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
