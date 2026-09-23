@@ -620,6 +620,13 @@ function gantt(){
    jobs.forEach((j,idx)=>{
      let o=op(j.op),p=part(o?.part),runs=jobRuns(j),lateRuns=overrunRuns(j),labelDone=false,dimAlert=state.alerts.find(a=>a.jobId===j.id&&a.type==='dimensional'&&!a.archived&&!a.closed),dimPending=false;
      dimPending=!!(dimAlert&&!dimAlert.read);
+     let attachedOverrun=false;
+     if(runs.length&&lateRuns.length){
+       let pr=runs[runs.length-1],lr=lateRuns[0];
+       let plannedVisualEnd=new Date(pr.lastDate.getTime()+pr.endFrac*86400000);
+       let overrunVisualStart=new Date(lr.startDate.getTime()+lr.startFrac*86400000);
+       attachedOverrun=Math.abs(plannedVisualEnd-overrunVisualStart)<60000;
+     }
      let names=[j.m,j.a,j.n].filter(Boolean).map(id=>emp(id)?.name).filter(Boolean).join(', ')||'Sem operador';
      let tooltip=[
        `OF: ${j.of||'—'}`,`Peça: ${p?.code||'—'} - ${p?.desc||'—'}`,`Operação: ${o?.op||'—'}`,
@@ -627,7 +634,7 @@ function gantt(){
        `Operadores: ${names}`,`Início previsto: ${jobStartDateTime(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
        j.actualStartAt?`Início real: ${fmtDateTime(j.actualStartAt)}`:'Início real: ainda não confirmado',
        `Fim previsto: ${end(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`,
-       lateRuns.length?`Atraso adicional: em curso até ${jobOccupancyEnd(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`:'',
+       lateRuns.length?(j.status==='Concluída'?`Atraso adicional concluído: ${fmtHours(Math.max(0,(jobOccupancyEnd(j)-end(j))/3600000))}`:`Atraso adicional: em curso até ${jobOccupancyEnd(j).toLocaleString('pt-PT',{dateStyle:'short',timeStyle:'short'})}`):'',
        j.actualEndAt?`Fim real: ${fmtDateTime(j.actualEndAt)}`:j.completedDate?`Fim real: ${pd(j.completedDate).toLocaleDateString('pt-PT')}`:'',
        j.status==='Concluída'?`Quantidade final: ${j.finalQty??j.qty}${j.rejectedQty?` · rejeitada: ${j.rejectedQty}`:''}`:'',
        j.workSaturdays?'Sábados disponíveis: SIM':'Sábados disponíveis: NÃO',
@@ -643,9 +650,10 @@ function gantt(){
        if(v<=0)return;
        let b=document.createElement('button');
        let startLate=j.status==='Programada'&&!j.actualStartAt&&new Date()>jobStartDateTime(j);
-       b.className='bar segment '+(j.status==='Concluída'?'done':j.status==='Interrompida'?'interrupted':startLate?'late':idx%2===0?'g1':'g2')+(labelDone?' blank':'');
+       let continuesOverrun=attachedOverrun&&run===runs[runs.length-1];
+       b.className='bar segment '+(j.status==='Concluída'?'done':j.status==='Interrompida'?'interrupted':startLate?'late':idx%2===0?'g1':'g2')+(labelDone?' blank':'')+(continuesOverrun?' continues-overrun':'');
        b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
-       b.style.width=`calc((100% - 155px) * ${v/totalDays} - 3px)`;
+       b.style.width=continuesOverrun?`calc((100% - 155px) * ${v/totalDays})`:`calc((100% - 155px) * ${v/totalDays} - 3px)`;
        if(!labelDone){
          b.innerHTML=`${dimPending?'<span class="dim-dot" title="Relatório dimensional pendente"></span>':''}<strong>${j.of?`OF ${esc(j.of)} · `:''}${esc(p?.code)} · ${esc(o?.op)} · ${j.qty} pç</strong><span class="bar-name">${esc(p?.desc||'')}</span>`;
          labelDone=true;
@@ -664,10 +672,11 @@ function gantt(){
        let width=(run.days-1)+(run.endFrac-run.startFrac);
        if(off>totalDays||off+width<0)return;
        let s=Math.max(0,off),ee=Math.min(totalDays,off+width),v=ee-s;if(v<=0)return;
-       let b=document.createElement('button');b.className='bar segment overrun'+(lateIdx?' blank':'');
+       let b=document.createElement('button'),attached=lateIdx===0&&attachedOverrun,completed=j.status==='Concluída';
+       b.className='bar segment '+(completed?'done overrun-completed':'overrun')+(lateIdx?' blank':'')+(attached?' attached':'');
        b.style.left=`calc(155px + (100% - 155px) * ${s/totalDays})`;
-       b.style.width=`calc((100% - 155px) * ${v/totalDays} - 1px)`;
-       if(!lateIdx)b.innerHTML='<strong>ATRASO</strong><span class="bar-name">tempo adicional</span>';
+       b.style.width=attached?`calc((100% - 155px) * ${v/totalDays})`:`calc((100% - 155px) * ${v/totalDays} - 1px)`;
+       if(!completed&&!lateIdx)b.innerHTML='<strong>ATRASO</strong><span class="bar-name">tempo adicional</span>';
        let planned=end(j),occupancy=jobOccupancyEnd(j);
        b.title=[tooltip,`Tempo adicional após o fim previsto: ${fmtHours(Math.max(0,(occupancy-planned)/3600000))}`].join('\n');
        b.draggable=false;b.onclick=ev=>editJobOpen(j,pointerDateTimeInRow(ev,r,totalDays));r.appendChild(b);
@@ -1314,7 +1323,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.9`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.10`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1337,7 +1346,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.9',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.10',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);

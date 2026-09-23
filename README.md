@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.9
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.10
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -126,3 +126,11 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Ao concluir com fim real posterior ao previsto, o segmento vermelho tracejado fica registado visualmente até ao fim real.
 - O tempo adicional de ocupação empurra automaticamente todas as produções seguintes da mesma máquina.
 - A regra é aplicada a todas as máquinas/recursos e mantém a regra anterior: encurtar uma produção não puxa automaticamente as seguintes para trás.
+
+
+## V2.2.10 — correção visual do atraso e conclusão
+
+- O tempo adicional em curso aparece como continuação visual da barra original, sem parecer uma segunda produção.
+- Ao concluir uma produção com atraso, a extensão adicional deixa o vermelho tracejado e passa também a cinzento.
+- O fim previsto e o fim real continuam guardados separadamente.
+- A ocupação real continua a empurrar as produções seguintes da mesma máquina.

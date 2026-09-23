@@ -403,7 +403,12 @@ nav #backupBtn{margin-left:auto}
 /* V2.2.6 — carga de colaboradores */
 .load-filters{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:14px;padding:14px}.load-filters label{min-width:180px;flex:1}.load-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 14px}.load-kpi{background:#fff;border:1px solid #dde3eb;border-radius:12px;padding:14px 16px}.load-kpi small{display:block;color:#697386;margin-bottom:5px}.load-kpi strong{font-size:24px}.load-kpi.ok strong{color:#2f855a}.load-kpi.share strong{color:#2563eb}.load-kpi.danger{border-color:#f2b8b5;background:#fff7f7}.load-kpi.danger strong{color:#c53030}.load-badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700}.load-badge.share{background:#e8f1ff;color:#1d4ed8}.load-badge.danger{background:#fee2e2;color:#b91c1c}.load-row-danger td{background:#fff7f7}.load-note{margin-top:10px}@media(max-width:760px){.load-summary{grid-template-columns:1fr}.load-filters{display:grid;grid-template-columns:1fr}.load-filters label{min-width:0}}
 
-/* V2.2.9 — atraso real após o fim previsto */
+/* V2.2.10 — atraso contínuo e conclusão integral a cinzento */
 .overrun-key{background:repeating-linear-gradient(135deg,#b42318 0,#b42318 6px,#fff 6px,#fff 10px)!important;border:1px solid #b42318}
 .bar.overrun{background:repeating-linear-gradient(135deg,#b42318 0,#b42318 8px,#ef4444 8px,#ef4444 13px,#fff 13px,#fff 16px);color:#fff;border:2px dashed #7f1d1d;z-index:4}
 .bar.overrun strong,.bar.overrun .bar-name{text-shadow:0 1px 1px rgba(0,0,0,.35)}
+
+/* V2.2.10 — o atraso é continuação visual da mesma produção */
+.bar.segment.continues-overrun{border-top-right-radius:0;border-bottom-right-radius:0;border-right:0}
+.bar.segment.overrun.attached,.bar.segment.overrun-completed.attached{border-top-left-radius:0;border-bottom-left-radius:0;border-left:0}
+.bar.segment.overrun-completed{background:#98a2b3;color:#fff;border-color:rgba(0,0,0,.15);z-index:3;filter:saturate(.4)}
