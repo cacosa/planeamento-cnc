@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.8
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.9
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -108,7 +108,7 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - O Gantt recalcula a capacidade em todos os dias do intervalo.
 
 
-## V2.2.8 — Correção global da fila das máquinas
+## V2.2.9 — Correção global da fila das máquinas
 
 - Corrigida a regressão em que uma barra podia aumentar e sobrepor-se à produção seguinte.
 - A correção aplica-se a **todas as máquinas e recursos**.
@@ -117,3 +117,12 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Durante uma interrupção ativa, a fila é revalidada periodicamente para acompanhar o crescimento da barra em tempo real.
 - Mantém-se a regra anterior: se uma produção encurtar, as seguintes **não são puxadas automaticamente para trás**.
 - Não requer alterações SQL no Supabase.
+
+
+## V2.2.9 — atraso real em produção
+- Vermelho sólido passa a significar produção programada que já devia ter iniciado mas ainda não iniciou.
+- Uma produção Em produção que ultrapasse o fim previsto mantém a parte planeada na cor normal e acrescenta um segmento vermelho tracejado para o tempo adicional.
+- O segmento de atraso cresce enquanto a produção continuar em curso e deixa de crescer quando é concluída.
+- Ao concluir com fim real posterior ao previsto, o segmento vermelho tracejado fica registado visualmente até ao fim real.
+- O tempo adicional de ocupação empurra automaticamente todas as produções seguintes da mesma máquina.
+- A regra é aplicada a todas as máquinas/recursos e mantém a regra anterior: encurtar uma produção não puxa automaticamente as seguintes para trás.
