@@ -197,22 +197,23 @@ function save(){
 }
 async function bootstrapRemote(){
  setMode('A ligar ao Supabase…');
- if(!supabaseConfigured()){remoteReady=false;setMode('Modo local');render();return}
+ if(!supabaseConfigured()){remoteReady=false;setMode('Modo local');repushAll();render();return}
  try{
    const rows=await sbFetch('app_state?id=eq.1&select=data,updated_at');
-   let repairedActiveInterruptions=false;
+   let repairedQueues=false;
    if(Array.isArray(rows)&&rows.length&&rows[0].data){
      applySnapshot(rows[0].data);
-     // Corrige também interrupções que já estavam ativas antes desta versão.
-     repairedActiveInterruptions=pushActiveInterruptionFollowers();
+     // Revalida TODAS as filas ao carregar. Isto corrige sobreposições já existentes
+     // e garante que interrupções antigas também empurram as OFs seguintes.
+     repairedQueues=repushAll();
      localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar,absences:state.absences}));
      localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
    }else{
      await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
    }
    remoteReady=true;setMode('Supabase ligado',true);render();
-   if(repairedActiveInterruptions)scheduleRemoteSave();
- }catch(err){console.error(err);remoteReady=false;setMode('Modo local — Supabase indisponível');render()}
+   if(repairedQueues)scheduleRemoteSave();
+ }catch(err){console.error(err);remoteReady=false;setMode('Modo local — Supabase indisponível');repushAll();render()}
 }
 
 function tm(s){if(!s)return 0;let [h,m]=s.split(':').map(Number);return h*60+m}
@@ -1315,7 +1316,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.8.3`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V3.0`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1338,7 +1339,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.8.3',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'3.0',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
@@ -1354,15 +1355,20 @@ $('weeksVisible').addEventListener('change',()=>{state.weeksVisible=Number($('we
 $('refreshPeopleLoad')?.addEventListener('click',renderPeopleLoad);
 
 // Enquanto existir uma interrupção ativa, a duração efetiva cresce com o tempo.
-// Revalida todas as filas periodicamente para que as OFs seguintes sejam empurradas
-// antes de ocorrer qualquer sobreposição visual ou temporal.
+// A cada ciclo revalida TODAS as filas das máquinas. Desta forma, quando a barra
+// interrompida alcança outra OF, essa OF e todas as seguintes são empurradas em cascata.
+// A rotina não puxa barras para trás: só desloca para a frente quando há sobreposição.
 setInterval(()=>{
  const hasActive=state.jobs.some(j=>activeInterruption(j));
  if(!hasActive)return;
- const changed=pushActiveInterruptionFollowers();
- if(changed)save();
- // Mesmo sem deslocações, redesenha para atualizar o crescimento da barra interrompida.
- gantt();
+ const changed=repushAll();
+ if(changed){
+   save();
+   render();
+ }else{
+   // Mesmo sem deslocações, redesenha para atualizar o crescimento da barra interrompida.
+   gantt();
+ }
  if(changed)renderPeopleLoad();
 },5000);
 

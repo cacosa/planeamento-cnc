@@ -1,4 +1,11 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.8.3
+# PLANEAMENTO - MAQUINAÇÃO · V3.0
+
+## V3.0 — nova base estável
+- Criada a partir da linha estável V2.2.8.x.
+- Mantém a correção de interrupções ativas e empurrar em cascata as produções seguintes.
+- Mantém a gravação no Supabase e todas as funções já estabilizadas.
+- A partir desta versão, novas alterações devem ser introduzidas e testadas uma de cada vez.
+
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -119,22 +126,31 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Não requer alterações SQL no Supabase.
 
 
-## V2.2.8.3 — Correção de interrupções ativas
+## V3.0 — Correção de interrupções ativas
 - Baseada exclusivamente na V2.2.8 estável.
 - Quando uma produção está interrompida e a sua duração cresce com o tempo, as produções seguintes da mesma máquina são empurradas automaticamente para evitar sobreposição.
 - A verificação é repetida enquanto existir uma interrupção ativa.
 - Não altera a restante lógica de cores, sequência, sábados, ausências ou conclusão.
 
 
-## Correções V2.2.8.3
+## Correções V3.0
 - Interrupção ativa: quando a barra cresce e alcança a OF seguinte, toda a fila da mesma máquina é empurrada até estabilizar, sem sobreposições.
 - Gravação Supabase reforçada: alterações feitas enquanto existe uma gravação em curso deixam de ser descartadas; ficam pendentes e são enviadas em seguida.
 - Indicador de estado mostra `A guardar…` e `Guardado no Supabase`.
 
 
-## Correção V2.2.8.3
+## Correção V3.0
 
 - As interrupções ativas já existentes no `app_state` são verificadas imediatamente ao abrir a aplicação.
 - A correção atua a partir da própria OF interrompida e empurra apenas as produções seguintes da mesma máquina.
 - A propagação repete-se até a fila ficar sem sobreposições.
 - O mesmo processo continua a ser executado periodicamente enquanto existir uma interrupção ativa.
+
+
+## V3.0 — interrupções empurram a fila globalmente
+
+- Baseada na V2.2.8.x estável.
+- Enquanto existir uma interrupção ativa, a aplicação revalida todas as filas de máquinas a cada 5 segundos.
+- Se a barra interrompida crescer até alcançar a OF seguinte, essa OF é deslocada para a frente e o efeito propaga-se em cascata.
+- Ao abrir a aplicação, todas as filas também são revalidadas para corrigir sobreposições já existentes.
+- Nenhuma barra é puxada automaticamente para trás.
