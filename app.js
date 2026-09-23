@@ -139,9 +139,9 @@ function normalizeState(){
 }
 normalizeState();
 
-let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false;
+let remoteReady=false,remoteSyncTimer=null,remoteSyncBusy=false,remoteSyncPending=false;
 function snapshotState(){
- return {version:227,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
+ return {version:2282,clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,saturdays:state.saturdays||{},calendar:state.calendar||[],absences:state.absences||[]};
 }
 function applySnapshot(data){
  if(!data||typeof data!=='object')return false;
@@ -160,15 +160,36 @@ async function sbFetch(path,options={}){
 }
 function setMode(text,ok=false){if(!$('mode'))return;$('mode').textContent=text;$('mode').classList.toggle('online',ok)}
 async function writeRemoteState(){
- if(!remoteReady||remoteSyncBusy)return;
+ if(!remoteReady)return;
+ if(remoteSyncBusy){remoteSyncPending=true;return}
  remoteSyncBusy=true;
  try{
-   await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:snapshotState(),updated_at:new Date().toISOString()}])});
-   setMode('Supabase ligado',true);
- }catch(err){console.error(err);setMode('Erro de sincronização')}
- finally{remoteSyncBusy=false}
+   do{
+     remoteSyncPending=false;
+     const payload=snapshotState();
+     setMode('A guardar…',true);
+     await sbFetch('app_state?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify([{id:1,data:payload,updated_at:new Date().toISOString()}])});
+   }while(remoteSyncPending);
+   setMode('Guardado no Supabase',true);
+ }catch(err){
+   console.error(err);
+   remoteSyncPending=true;
+   setMode('Erro de sincronização — alteração mantida localmente');
+ }finally{
+   remoteSyncBusy=false;
+   if(remoteSyncPending&&remoteReady){
+     clearTimeout(remoteSyncTimer);
+     remoteSyncTimer=setTimeout(writeRemoteState,900);
+   }
+ }
 }
-function scheduleRemoteSave(){if(!remoteReady)return;clearTimeout(remoteSyncTimer);remoteSyncTimer=setTimeout(writeRemoteState,350)}
+function scheduleRemoteSave(){
+ if(!remoteReady)return;
+ remoteSyncPending=true;
+ setMode('A guardar…',true);
+ clearTimeout(remoteSyncTimer);
+ remoteSyncTimer=setTimeout(writeRemoteState,250);
+}
 function save(){
  localStorage.setItem('cnc-v12',JSON.stringify({clients:state.clients,machines:state.machines,employees:state.employees,parts:state.parts,ops:state.ops,jobs:state.jobs,alerts:state.alerts,calendar:state.calendar,absences:state.absences}));
  localStorage.setItem('cnc-v13-saturdays',JSON.stringify(state.saturdays||{}));
@@ -761,6 +782,39 @@ function repushAll(){
  return changed;
 }
 
+function pushFollowersFromJob(job){
+ let changed=false;
+ let queue=state.jobs.filter(j=>j.machine===job.machine).sort((a,b)=>jobStartDateTime(a)-jobStartDateTime(b));
+ let idx=queue.findIndex(j=>j.id===job.id);
+ if(idx<0)return false;
+ let occupiedUntil=end(queue[idx]);
+ for(let i=idx+1;i<queue.length;i++){
+   let cur=queue[i],now=jobStartDateTime(cur);
+   if(now<occupiedUntil){
+     let next=firstJobWorkInstantAtOrAfter(cur,occupiedUntil);
+     if(next>now){setJobStartDateTime(cur,next);changed=true}
+   }
+   let curEnd=end(cur);
+   if(curEnd>occupiedUntil)occupiedUntil=curEnd;
+ }
+ return changed;
+}
+
+function pushActiveInterruptionFollowers(){
+ let changed=false;
+ const machineIds=[...new Set(state.jobs.filter(j=>activeInterruption(j)).map(j=>j.machine))];
+ for(const mid of machineIds){
+   // Uma interrupção ativa aumenta a ocupação real da máquina. Reaplica a fila
+   // até estabilizar, para que o efeito se propague por todas as OFs seguintes.
+   let guard=0,again=false;
+   do{
+     again=push(mid);
+     if(again)changed=true;
+   }while(again&&guard++<100);
+ }
+ return changed;
+}
+
 function keepMachineQueuesSeparated({persist=false}={}){
  const changed=repushAll();
  if(changed&&persist)save();
@@ -1251,7 +1305,7 @@ async function generateMachineSummaryPdf(){
      if(y+22>ph-10){doc.addPage();addHeader();doc.setFont('helvetica','bold');doc.setFontSize(9);doc.text(`${m.code} - continuação`,10,y);y+=4}
      y=drawMachineMiniGantt(doc,m,jobs,startDate,endExclusive,y,pw)+6;
    }
-   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.8`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
+   const pages=doc.getNumberOfPages();for(let i=1;i<=pages;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(100);doc.text(`FABCAST · Planeamento - Maquinação · V2.2.8.2`,10,ph-5);doc.text(`Página ${i} de ${pages}`,pw-10,ph-5,{align:'right'})}
    doc.save(`Resumo_Maquinas_${startStr}_a_${endStr}.pdf`);$('machineSummaryDlg').close();
  }catch(e){console.error(e);err.textContent='Não foi possível gerar o PDF. '+(e?.message||e)}finally{btn.disabled=false;btn.textContent=old}
 }
@@ -1274,7 +1328,7 @@ function renderAlerts(){
 $('alertsBtn').onclick=()=>{renderAlerts();$('alertsDlg').showModal()};
 
 function downloadBackup(){
- let payload={backup_type:'planeamento-maquinacao',version:'2.2.8',created_at:new Date().toISOString(),data:snapshotState()};
+ let payload={backup_type:'planeamento-maquinacao',version:'2.2.8.2',created_at:new Date().toISOString(),data:snapshotState()};
  let blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}),u=window.URL.createObjectURL(blob),a=document.createElement('a'),d=new Date();
  let stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}-${String(d.getMinutes()).padStart(2,'0')}`;
  a.href=u;a.download=`backup-planeamento-maquinacao_${stamp}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>window.URL.revokeObjectURL(u),500);
@@ -1295,11 +1349,12 @@ $('refreshPeopleLoad')?.addEventListener('click',renderPeopleLoad);
 setInterval(()=>{
  const hasActive=state.jobs.some(j=>activeInterruption(j));
  if(!hasActive)return;
- const changed=keepMachineQueuesSeparated({persist:true});
+ const changed=pushActiveInterruptionFollowers();
+ if(changed)save();
  // Mesmo sem deslocações, redesenha para atualizar o crescimento da barra interrompida.
  gantt();
  if(changed)renderPeopleLoad();
-},60000);
+},5000);
 
 tabs();
 bootstrapRemote();

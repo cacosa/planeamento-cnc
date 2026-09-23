@@ -1,4 +1,4 @@
-# PLANEAMENTO - MAQUINAÇÃO · V2.2.8
+# PLANEAMENTO - MAQUINAÇÃO · V2.2.8.2
 
 ## Novidade principal — Sequências permitidas por peça
 
@@ -117,3 +117,16 @@ Depois fazer commit, aguardar a publicação e atualizar a página.
 - Durante uma interrupção ativa, a fila é revalidada periodicamente para acompanhar o crescimento da barra em tempo real.
 - Mantém-se a regra anterior: se uma produção encurtar, as seguintes **não são puxadas automaticamente para trás**.
 - Não requer alterações SQL no Supabase.
+
+
+## V2.2.8.2 — Correção de interrupções ativas
+- Baseada exclusivamente na V2.2.8 estável.
+- Quando uma produção está interrompida e a sua duração cresce com o tempo, as produções seguintes da mesma máquina são empurradas automaticamente para evitar sobreposição.
+- A verificação é repetida enquanto existir uma interrupção ativa.
+- Não altera a restante lógica de cores, sequência, sábados, ausências ou conclusão.
+
+
+## Correções V2.2.8.2
+- Interrupção ativa: quando a barra cresce e alcança a OF seguinte, toda a fila da mesma máquina é empurrada até estabilizar, sem sobreposições.
+- Gravação Supabase reforçada: alterações feitas enquanto existe uma gravação em curso deixam de ser descartadas; ficam pendentes e são enviadas em seguida.
+- Indicador de estado mostra `A guardar…` e `Guardado no Supabase`.
